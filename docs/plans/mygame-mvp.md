@@ -24,11 +24,11 @@
 
 **Status:** ready-for-agent
 
-- [ ] monorepo 结构（frontend / backend / shared）就绪，TypeScript 全栈
-- [ ] backend 启动后可连接 Postgres 并返回健康检查
-- [ ] frontend 显示 backend 健康检查结果，证明前后端连通
-- [ ] GitHub Actions 在 push 到 main 时自动构建并部署 frontend 到 GitHub Pages
-- [ ] 本地一条命令启动开发环境（frontend + backend 同时起）
+- [x] monorepo 结构（frontend / backend / shared）就绪，TypeScript 全栈
+- [x] backend 启动后可连接 Postgres 并返回健康检查
+- [x] frontend 显示 backend 健康检查结果，证明前后端连通
+- [x] GitHub Actions 在 push 到 main 时自动构建并部署 frontend 到 GitHub Pages
+- [x] 本地一条命令启动开发环境（frontend + backend 同时起）
 
 ## Task 2 — 账号与初始武将
 
@@ -38,11 +38,11 @@
 
 **Status:** ready-for-agent
 
-- [ ] users 表：用户名、密码哈希、注册时间
-- [ ] 注册/登录/登出 API，会话持久（token 或 cookie）
-- [ ] 注册即赠送初始武将（乡勇部队）、初始资源
-- [ ] 登录页/注册页 UI，流程可走通
-- [ ] 登录后主界面显示自己的武将卡与资源
+- [x] users 表：用户名、密码哈希、注册时间
+- [x] 注册/登录/登出 API，会话持久（token 或 cookie）
+- [x] 注册即赠送初始武将（乡勇部队）、初始资源
+- [x] 登录页/注册页 UI，流程可走通
+- [x] 登录后主界面显示自己的武将卡与资源
 
 ## Task 3 — 世界地图与指挥台框架
 

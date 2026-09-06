@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import type { Db } from './db.js';
 import { checkDb } from './db.js';
+import { createAuthRouter } from './routes/auth.js';
 import type { HealthResponse } from '@mygame/shared';
 
 export interface AppOptions {
@@ -14,6 +15,8 @@ export function createApp({ db }: AppOptions): express.Express {
 
   app.use(cors());
   app.use(express.json());
+
+  app.use('/api/auth', createAuthRouter(db));
 
   app.get('/api/health', async (_req, res) => {
     const dbConnected = await checkDb(db);

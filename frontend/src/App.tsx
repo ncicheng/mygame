@@ -1,59 +1,83 @@
-import { useEffect, useState } from 'react';
-import type { HealthResponse } from '@mygame/shared';
+import { useCallback, useEffect, useState } from 'react';
+import type { UserProfile } from '@mygame/shared';
+import { apiLogout, apiMe } from './api';
+import { AccountView } from './AccountView';
+import { AuthForm } from './AuthForm';
 
-// 生产环境（GitHub Pages）通过构建时注入 VITE_API_BASE_URL 指向后端地址；
-// 开发环境由 Vite 代理 /api 到本地后端，留空即可。
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';
+const TOKEN_KEY = 'mygame_token';
+
+function readToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
 
 function App() {
-  const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [token, setToken] = useState<string | null>(() => readToken());
+  const [user, setUser] = useState<UserProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(token !== null);
 
+  // 有 token 时拉取用户档案（会话持久：刷新页面后仍保持登录）
   useEffect(() => {
+    if (!token) {
+      setUser(null);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
-    fetch(`${API_BASE}/api/health`)
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
+    setLoading(true);
+    apiMe(token)
+      .then((u) => {
+        if (cancelled) {
+          return;
         }
-        return res.json() as Promise<HealthResponse>;
-      })
-      .then((body) => {
-        if (!cancelled) {
-          setHealth(body);
-        }
+        setUser(u);
+        setError(null);
       })
       .catch((err: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        // token 失效或网络异常：清除本地会话，回到登录页
+        localStorage.removeItem(TOKEN_KEY);
+        setToken(null);
+        setUser(null);
+        setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
+          setLoading(false);
         }
       });
     return () => {
       cancelled = true;
     };
+  }, [token]);
+
+  const handleAuth = useCallback((newToken: string, newUser: UserProfile) => {
+    localStorage.setItem(TOKEN_KEY, newToken);
+    setToken(newToken);
+    setUser(newUser);
+    setError(null);
   }, []);
 
+  const handleLogout = useCallback(() => {
+    if (token) {
+      apiLogout(token).catch(() => {
+        // 登出失败不阻塞本地退出
+      });
+    }
+    localStorage.removeItem(TOKEN_KEY);
+    setToken(null);
+    setUser(null);
+  }, [token]);
+
   return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', padding: '2rem', maxWidth: 640 }}>
+    <main style={{ fontFamily: 'system-ui, sans-serif', padding: '2rem', maxWidth: 720 }}>
       <h1>MyGame — 运筹帷幄</h1>
-      <p style={{ color: '#666' }}>多人在线实时策略对战（脚手架 v0.1）</p>
-      <section>
-        <h2>后端健康检查</h2>
-        {error && <p style={{ color: 'crimson' }}>无法连接后端：{error}</p>}
-        {!error && !health && <p>正在检查后端连接…</p>}
-        {health && (
-          <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.5rem 1rem' }}>
-            <dt>状态</dt>
-            <dd>{health.status}</dd>
-            <dt>数据库</dt>
-            <dd>{health.db === 'connected' ? '已连接' : '未连接'}</dd>
-            <dt>运行时长</dt>
-            <dd>{Math.round(health.uptime)}s</dd>
-            <dt>时间戳</dt>
-            <dd>{new Date(health.timestamp).toLocaleString()}</dd>
-          </dl>
-        )}
-      </section>
+      {error && <p style={{ color: 'crimson' }}>{error}</p>}
+      {token === null && <AuthForm onAuth={handleAuth} />}
+      {token !== null && loading && <p>正在读取存档…</p>}
+      {token !== null && !loading && user !== null && <AccountView user={user} onLogout={handleLogout} />}
     </main>
   );
 }
