@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyGame · 主界面 UI 原型</title>
+<style>
+  /* ============ 基础 ============ */
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; }
+  body { font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background:#14181c; overflow:hidden; }
+  .proto-banner {
+    position:fixed; top:0; left:0; right:0; z-index:1000;
+    background:#1e2733; color:#c9d4e0; font-size:12px; padding:4px 12px;
+    display:flex; gap:10px; align-items:center; border-bottom:1px solid #33404f;
+  }
+  .proto-banner b { color:#ffd27a; }
+  .proto-banner .badge {
+    background:#7a5c2e; color:#ffe1a8; border-radius:4px; padding:0 6px; font-size:11px;
+    letter-spacing:.5px; white-space:nowrap;
+  }
+  .proto-banner span.q { color:#8fa3b8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .proto-host { position:fixed; inset:26px 0 0 0; overflow:hidden; }
+
+  /* ============ 共享地图网格 ============ */
+  .grid { display:grid; gap:0; }
+  .cell { position:relative; border-right:1px solid rgba(0,0,0,.12); border-bottom:1px solid rgba(0,0,0,.12); }
+  .cell:last-child { border-right:none; }
+  .cell.row-last { border-bottom:none; }
+  .terr-g { background:#a8c08a; }
+  .terr-f { background:#5f8a5a; }
+  .terr-m { background:#8f8374; }
+  .terr-w { background:#5d88b8; }
+  .mk { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; }
+  .mk-city-me  { background:rgba(20,120,220,.18); color:#0b5cad; border:2px solid #0b5cad; }
+  .mk-city-enm { background:rgba(200,60,40,.18); color:#a0311c; border:2px solid #c8452c; }
+  .mk-bandit   { background:rgba(120,80,20,.16); color:#7a4e14; border:1.5px dashed #7a4e14; }
+  .mk-army-me  { background:rgba(20,120,220,.30); color:#063d7a; border:2px solid #063d7a; }
+  .mk-army-enm { background:rgba(200,60,40,.30); color:#6e1d0e; border:2px solid #6e1d0e; }
+
+  /* ============ 浮动切换条 ============ */
+  #switcher {
+    position:fixed; bottom:14px; left:50%; transform:translateX(-50%); z-index:2000;
+    display:flex; align-items:center; gap:10px; padding:6px 14px;
+    background:rgba(18,24,32,.92); border:1px solid #3a4a5c; border-radius:999px;
+    box-shadow:0 6px 24px rgba(0,0,0,.5); color:#dfe7f0;
+    user-select:none;
+  }
+  #switcher button {
+    background:transparent; border:none; color:#ffd27a; font-size:18px; cursor:pointer;
+    width:30px; height:30px; border-radius:50%; line-height:1;
+  }
+  #switcher button:hover { background:#2a3644; }
+  #switcher .label { font-size:13px; min-width:150px; text-align:center; }
+  #switcher .label small { color:#8fa3b8; display:block; font-size:11px; }
+  #switcher .debug-btn {
+    background:#2a3644; color:#dfe7f0; border:none; border-radius:6px; padding:4px 10px;
+    font-size:11px; cursor:pointer; margin-left:8px;
+  }
+  #debugdrawer {
+    position:fixed; right:14px; bottom:60px; z-index:2000; width:320px; max-height:60vh; overflow:auto;
+    background:rgba(18,24,32,.96); border:1px solid #3a4a5c; border-radius:8px; padding:12px;
+    color:#c9d4e0; font:11px/1.5 ui-monospace, "SF Mono", Menlo, monospace; display:none;
+  }
+  #debugdrawer.open { display:block; }
+  #debugdrawer pre { white-space:pre-wrap; word-break:break-all; }
+
+  /* ============ Variant A · 水墨军务 ============ */
+  .va { width:100%; height:100%; background:#f2ece0; color:#2b2b28; font-family:"Songti SC","Noto Serif SC","STSong",serif; display:flex; flex-direction:column; }
+  .va .top { display:flex; align-items:center; gap:14px; padding:8px 16px; background:#2c3d33; color:#e9e2d0; border-bottom:3px solid #b08a3e; }
+  .va .avatar { width:38px; height:38px; border-radius:50%; background:#b08a3e; color:#2c3d33; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:18px; }
+  .va .who { font-size:14px; }
+  .va .who small { color:#b9c9bd; display:block; font-size:11px; }
+  .va .res { display:flex; gap:18px; margin-left:auto; font-size:13px; }
+  .va .res i { color:#ffd27a; font-style:normal; margin-right:4px; }
+  .va .btns { display:flex; gap:6px; }
+  .va .btns button { background:#b08a3e; color:#2c3d33; border:none; padding:5px 12px; font-family:inherit; font-size:13px; cursor:pointer; border-radius:3px; font-weight:700; }
+  .va .main { flex:1; display:grid; grid-template-columns:1fr 300px; min-height:0; }
+  .va .mapwrap { position:relative; display:flex; align-items:center; justify-content:center; padding:18px; min-height:0; overflow:hidden; }
+  .va .mapframe { background:#dfd6c0; border:3px solid #b08a3e; box-shadow:0 8px 24px rgba(0,0,0,.25); }
+  .va .maplabel { position:absolute; top:8px; left:50%; transform:translateX(-50%); background:rgba(44,61,51,.92); color:#e9e2d0; padding:3px 14px; border-radius:3px; font-size:12px; letter-spacing:2px; }
+  .va .selbar { position:absolute; bottom:8px; left:50%; transform:translateX(-50%); background:rgba(44,61,51,.92); color:#ffd27a; padding:3px 12px; border-radius:3px; font-size:12px; }
+  .va .side { display:flex; flex-direction:column; border-left:1px solid #c9bfa4; background:#efe8d6; min-height:0; }
+  .va .tabs { display:flex; border-bottom:1px solid #c9bfa4; }
+  .va .tabs button { flex:1; background:transparent; border:none; border-right:1px solid #c9bfa4; padding:9px 0; font-family:inherit; font-size:13px; cursor:pointer; color:#6b6250; }
+  .va .tabs button.active { background:#2c3d33; color:#ffd27a; }
+  .va .feed { flex:1; overflow:auto; padding:10px; }
+  .va .feed li { list-style:none; background:#fffdf6; border:1px solid #d8cdb0; border-radius:4px; padding:8px 10px; margin-bottom:8px; font-size:12px; }
+  .va .feed li time { color:#9c9278; font-size:11px; }
+  .va .feed li .win { color:#1d7a3f; font-weight:700; }
+  .va .bottom { display:flex; align-items:center; gap:10px; padding:8px 14px; background:#2c3d33; border-top:3px solid #b08a3e; }
+  .va .cmd { background:#e0d7c0; color:#2b2b28; border:none; padding:8px 18px; font-family:inherit; font-size:14px; border-radius:3px; cursor:pointer; font-weight:700; }
+  .va .cmd:hover { background:#b08a3e; color:#2c3d33; }
+  .va .troops { margin-left:auto; display:flex; gap:8px; align-items:center; font-size:12px; color:#e9e2d0; }
+  .va .tchip { background:#1f2d25; border:1px solid #4a5f52; padding:3px 8px; border-radius:3px; }
+
+  /* ============ Variant B · 铁血沙场 ============ */
+  .vb { width:100%; height:100%; background:#101418; color:#d8dee6; font-family:system-ui,-apple-system,"PingFang SC",sans-serif; position:relative; overflow:hidden; }
+  .vb .fullmap { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
+  .vb .grid { box-shadow:0 0 80px rgba(0,0,0,.8); }
+  .vb .terr-g { background:#2e3d2c; }
+  .vb .terr-f { background:#22351f; }
+  .vb .terr-m { background:#3a3a3c; }
+  .vb .terr-w { background:#1f3a52; }
+  .vb .cell { border-color:rgba(255,255,255,.05); }
+  .vb .mk-city-me  { background:rgba(64,180,255,.18); color:#7fd2ff; border:2px solid #4ab4ff; font-size:12px; }
+  .vb .mk-city-enm { background:rgba(255,70,40,.16); color:#ff9a80; border:2px solid #ff5030; font-size:12px; }
+  .vb .mk-bandit   { background:rgba(255,180,40,.12); color:#ffc966; border:1px dashed #ffc966; }
+  .vb .mk-army-me  { background:rgba(64,180,255,.26); color:#b5e2ff; border:2px solid #4ab4ff; font-size:12px; }
+  .vb .mk-army-enm { background:rgba(255,70,40,.26); color:#ffb3a0; border:2px solid #ff5030; font-size:12px; }
+  .vb .hud { position:absolute; z-index:5; pointer-events:none; }
+  .vb .hud.res { top:12px; left:12px; display:flex; flex-direction:column; gap:6px; }
+  .vb .hud .chip { background:rgba(10,14,18,.85); border:1px solid #33404f; border-radius:5px; padding:4px 10px; font-size:12px; }
+  .vb .hud .chip b { color:#ffd27a; }
+  .vb .hud.menu { top:12px; left:50%; transform:translateX(-50%); display:flex; gap:6px; pointer-events:auto; }
+  .vb .hud.menu button { background:rgba(10,14,18,.85); color:#cfe0ee; border:1px solid #33404f; border-radius:5px; padding:6px 14px; font-size:12px; cursor:pointer; }
+  .vb .hud.menu button:hover { border-color:#ffd27a; color:#ffd27a; }
+  .vb .hud.minimap { bottom:12px; right:12px; background:rgba(10,14,18,.9); border:1px solid #33404f; border-radius:6px; padding:8px; }
+  .vb .hud.minimap .grid { box-shadow:none; }
+  .vb .hud.minimap .cell { width:8px; height:8px; border:none; }
+  .vb .hud.ticker { bottom:12px; left:12px; background:rgba(10,14,18,.85); border:1px solid #33404f; border-radius:5px; padding:6px 12px; font-size:12px; max-width:340px; }
+  .vb .hud.ticker div { padding:2px 0; color:#9fb2c4; }
+  .vb .hud.ticker .win { color:#7fe08e; }
+  .vb .selpanel { position:absolute; bottom:12px; left:50%; transform:translateX(-50%); z-index:6; background:rgba(10,14,18,.95); border:1px solid #4ab4ff; border-radius:8px; padding:10px 14px; display:flex; gap:16px; align-items:center; box-shadow:0 8px 30px rgba(0,0,0,.7); }
+  .vb .selpanel .portrait { width:56px; height:56px; border-radius:6px; background:#1f2a33; border:1px solid #33404f; display:flex; align-items:center; justify-content:center; font-size:28px; }
+  .vb .selpanel .info h3 { font-size:15px; color:#ffd27a; }
+  .vb .selpanel .info p { font-size:11px; color:#9fb2c4; }
+  .vb .selpanel button { background:#3a4a5c; color:#e6edf4; border:none; border-radius:5px; padding:7px 14px; font-size:12px; cursor:pointer; }
+  .vb .selpanel button.primary { background:#b8572e; color:#fff; }
+
+  /* ============ Variant C · 运筹帷幄 ============ */
+  .vc { width:100%; height:100%; background:#f7f0e1; color:#3a3326; font-family:system-ui,-apple-system,"PingFang SC",sans-serif; display:flex; flex-direction:column; }
+  .vc .top { display:flex; align-items:center; gap:12px; padding:8px 16px; background:#fffaf0; border-bottom:2px solid #e0d3b4; }
+  .vc .top h1 { font-size:16px; letter-spacing:2px; color:#7a4e14; }
+  .vc .top .ap { margin-left:auto; background:#7a4e14; color:#ffe9c2; border-radius:999px; padding:3px 14px; font-size:13px; font-weight:700; }
+  .vc .top .pl { font-size:12px; color:#8a7a5e; }
+  .vc .main { flex:1; display:grid; grid-template-columns:250px 1fr 250px; gap:12px; padding:12px; min-height:0; }
+  .vc .col { display:flex; flex-direction:column; gap:10px; min-height:0; overflow:auto; }
+  .vc .card { background:#fff; border:1px solid #e4d8bc; border-radius:12px; padding:10px 12px; box-shadow:0 2px 6px rgba(90,60,20,.06); }
+  .vc .card h4 { font-size:12px; color:#7a4e14; letter-spacing:1px; margin-bottom:8px; display:flex; align-items:center; gap:6px; }
+  .vc .gcard { display:flex; gap:10px; }
+  .vc .gcard .portrait { width:52px; height:52px; border-radius:10px; background:linear-gradient(135deg,#b8572e,#e8a13a); color:#fff; display:flex; align-items:center; justify-content:center; font-size:26px; flex-shrink:0; }
+  .vc .gcard .meta { font-size:11px; color:#6b5f49; line-height:1.6; }
+  .vc .gcard .meta b { font-size:13px; color:#3a3326; display:block; }
+  .vc .trow { display:flex; justify-content:space-between; align-items:center; font-size:11px; padding:5px 0; border-bottom:1px dashed #ece2cc; }
+  .vc .trow:last-child { border-bottom:none; }
+  .vc .trow .n { color:#7a4e14; font-weight:700; }
+  .vc .bar { height:8px; background:#eee3cd; border-radius:99px; overflow:hidden; margin-top:4px; }
+  .vc .bar > i { display:block; height:100%; background:#b8572e; border-radius:99px; }
+  .vc .boardwrap { display:flex; align-items:center; justify-content:center; min-height:0; }
+  .vc .grid { border:3px solid #b08a3e; border-radius:8px; box-shadow:0 10px 30px rgba(90,60,20,.18); }
+  .vc .terr-g { background:#cfe0b8; }
+  .vc .terr-f { background:#a5c79a; }
+  .vc .terr-m { background:#d3c9b2; }
+  .vc .terr-w { background:#a8c6e0; }
+  .vc .cell { border-color:rgba(90,60,20,.15); border-radius:2px; }
+  .vc .mk { border-radius:50%; font-size:9px; }
+  .vc .mk-city-me  { background:#2f7fe0; color:#fff; border:none; }
+  .vc .mk-city-enm { background:#e04f2f; color:#fff; border:none; }
+  .vc .mk-bandit   { background:#a07a20; color:#fff; border:none; }
+  .vc .mk-army-me  { background:#1fa7c8; color:#fff; border:none; }
+  .vc .mk-army-enm { background:#d04040; color:#fff; border:none; }
+  .vc .bottom { display:flex; gap:10px; padding:10px 16px; background:#fffaf0; border-top:2px solid #e0d3b4; }
+  .vc .act { background:#7a4e14; color:#ffe9c2; border:none; border-radius:10px; padding:9px 18px; font-size:13px; font-weight:700; cursor:pointer; display:flex; align-items:center; gap:6px; }
+  .vc .act .cost { background:rgba(0,0,0,.18); border-radius:6px; padding:1px 6px; font-size:11px; }
+  .vc .act:hover { background:#8f5e1a; }
+  .vc .act:disabled { opacity:.4; cursor:not-allowed; }
+  .vc .act.kind { background:#e7dcc0; color:#7a4e14; }
+  .vc .apnote { margin-left:auto; align-self:center; font-size:11px; color:#9c8b6c; }
+</style>
+</head>
+<body>
+
+<div class="proto-banner">
+  <span class="badge">PROTOTYPE · 可丢弃</span>
+  <b>MyGame 主界面 UI 原型</b>
+  <span class="q">验证的问题：这款多人在线策略游戏的主界面，哪种结构布局更有感觉？底部的切换条切换 A / B / C。</span>
+</div>
+
+<div class="proto-host" id="host"></div>
+
+<div id="switcher">
+  <button id="prev" title="上一个">◀</button>
+  <div class="label" id="swlabel">A</div>
+  <button id="next" title="下一个">▶</button>
+  <button class="debug-btn" id="debugtoggle">状态</button>
+</div>
+
+<div id="debugdrawer"><pre id="debugjson"></pre></div>
+
+<script>
+/* ============================================================
+ * 问题：这款多人在线策略游戏的主界面，哪种结构布局更有感觉？
+ * 这是 UI 原型 —— 三套结构迥异的界面方案，?variant=A|B|C 切换。
+ * mock 状态是共享的；纯静态、无持久化、无框架。
+ * ============================================================ */
+
+/* ---------- 共享 mock 状态 ---------- */
+const STATE = {
+  player: { name: '烽火狼烟', title: '镇国大将军', level: 18 },
+  res: { food: 12480, iron: 4560, rare: 128, gold: 9800 },
+  general: { name: '天策上将', tier: 10, level: 8, stars: 2, powerBonus: 0.15, maxTroops: 300 },
+  army: {
+    weapon: { name: '屠龙刀', tier: 10 },
+    troops: [
+      { name: '乡勇', tier: 1, count: 120 },
+      { name: '弓手', tier: 2, count: 60 },
+      { name: '铁骑', tier: 4, count: 20 },
+    ],
+  },
+  ap: 3, apMax: 5,
+  messages: [
+    { t: '己方部队已抵达边界，行军 4 格完毕', time: '08:12' },
+    { t: '打野胜利：击溃山贼营地，获得稀有材料 ×12', time: '07:46', win: true },
+    { t: '敌人部队正在向城门进发，距离 6 格', time: '06:30' },
+  ],
+  tasks: [
+    { name: '建造一座瞭望塔', done: false },
+    { name: '招募 100 名弓手', done: true },
+    { name: '击败 3 处山贼营地', done: true },
+  ],
+};
+
+/* 地图：20 列 × 14 行。g=平原 f=林地 m=山地 w=水域
+   C=我方城 E=敌方城 B=野地(山贼) A=我方部队 F=敌方部队 */
+const MAP_ASCII = [
+  'gggggggggggggggggggg',
+  'gggggggffggggggggggg',
+  'gggggfffgffggggggggg',
+  'wwwwggfffggggggggggg',
+  'wwwwggfffggggggggggg',
+  'wwwwgggggmmmgggggggg',
+  'gggggggggmmmmggggggg',
+  'gggggggggggggggggggg',
+  'gggggBgggggggggggggg',
+  'gggggggggggggggggggg',
+  'ggggggggggggggFggggg',
+  'gggggggggggggggggggg',
+  'gggggCgggggggggggggE',
+  'gggggggggggggggggggg',
+];
+
+const MARK = {
+  C: { kind:'city', side:'me',  label:'城' },
+  E: { kind:'city', side:'enemy', label:'敌城' },
+  B: { kind:'bandit', label:'野' },
+  A: { kind:'army', side:'me',  label:'军' },
+  F: { kind:'army', side:'enemy', label:'敌' },
+};
+
+function parseMap() {
+  const cells = [];
+  MAP_ASCII.forEach((row, r) => {
+    [...row].forEach((ch, c) => {
+      const t = 'gfwm'.includes(ch) ? ch : 'g';
+      cells.push({ t, r, c, m: MARK[ch] || null, last: c === row.length - 1, rowLast: r === MAP_ASCII.length - 1 });
+    });
+  });
+  return { cells, cols: MAP_ASCII[0].length, rows: MAP_ASCII.length };
+}
+const MAP = parseMap();
+
+function gridHTML(size, cls) {
+  return `<div class="grid ${cls||''}" style="grid-template-columns:repeat(${MAP.cols},${size}px); grid-template-rows:repeat(${MAP.rows},${size}px)">
+    ${MAP.cells.map(c => `<div class="cell terr-${c.t} ${c.rowLast?'row-last':''}">${c.m ? `<div class="mk mk-${c.m.kind}-${c.m.side||c.m.kind}">${c.m.label}</div>` : ''}</div>`).join('')}
+  </div>`;
+}
+
+/* ---------- 界面 A · 水墨军务（经典 SLG） ---------- */
+function variantA() {
+  const troops = STATE.army.troops.map(t => `<span class="tchip">${t.name}×${t.count}</span>`).join('');
+  const feed = STATE.messages.map(m => `<li><time>${m.time}</time> ${m.win ? `<span class="win">${m.text}</span>` : m.text}</li>`).join('');
+  return `
+  <div class="va">
+    <div class="top">
+      <div class="avatar">烽</div>
+      <div class="who">${STATE.player.name}<small>${STATE.player.title} · Lv.${STATE.player.level}</small></div>
+      <div class="res">
+        <span><i>粮</i>${STATE.res.food.toLocaleString()}</span>
+        <span><i>铁</i>${STATE.res.iron.toLocaleString()}</span>
+        <span><i>稀</i>${STATE.res.rare}</span>
+        <span><i>金</i>${STATE.res.gold.toLocaleString()}</span>
+      </div>
+      <div class="btns"><button>世界</button><button>排行</button><button>军团</button></div>
+    </div>
+    <div class="main">
+      <div class="mapwrap">
+        <div class="maplabel">烈 土 疆 域</div>
+        ${gridHTML(30, 'mapframe')}
+        <div class="selbar">已选中：天策上将部 · 驻守 我城</div>
+      </div>
+      <div class="side">
+        <div class="tabs"><button class="active">战报</button><button>消息</button><button>任务</button></div>
+        <ul class="feed">${feed}</ul>
+      </div>
+    </div>
+    <div class="bottom">
+      <button class="cmd">出征</button>
+      <button class="cmd">招募</button>
+      <button class="cmd">打野</button>
+      <button class="cmd">挑战</button>
+      <button class="cmd">军团</button>
+      <div class="troops">${troops}<span class="tchip">屠龙刀(10阶)</span></div>
+    </div>
+  </div>`;
+}
+
+/* ---------- 界面 B · 铁血沙场（沉浸式 RTS） ---------- */
+function variantB() {
+  const ticker = STATE.messages.map(m => `<div class="${m.win?'win':''}">[${m.time}] ${m.text}</div>`).join('');
+  return `
+  <div class="vb">
+    <div class="fullmap">${gridHTML(34)}</div>
+    <div class="hud res">
+      <div class="chip">粮 <b>${STATE.res.food.toLocaleString()}</b></div>
+      <div class="chip">铁 <b>${STATE.res.iron.toLocaleString()}</b></div>
+      <div class="chip">稀有 <b>${STATE.res.rare}</b></div>
+      <div class="chip">金 <b>${STATE.res.gold.toLocaleString()}</b></div>
+    </div>
+    <div class="hud menu">
+      <button>出征</button><button>招募</button><button>打野</button><button>军团</button><button>外交</button>
+    </div>
+    <div class="hud minimap">${gridHTML(8)}</div>
+    <div class="hud ticker">${ticker}</div>
+    <div class="selpanel">
+      <div class="portrait">🏮</div>
+      <div class="info">
+        <h3>${STATE.general.name} 部 · 我城</h3>
+        <p>${STATE.army.troops.map(t => `${t.name}×${t.count}`).join('　')}　·　屠龙刀(10阶)</p>
+      </div>
+      <button>移动</button>
+      <button class="primary">出击</button>
+      <button>撤 退</button>
+    </div>
+  </div>`;
+}
+
+/* ---------- 界面 C · 运筹帷幄（桌游指挥台） ---------- */
+function variantC() {
+  const troops = STATE.army.troops.map(t => `
+    <div class="trow"><span>${t.name}</span><span class="n">×${t.count}</span></div>`).join('');
+  const tasks = STATE.tasks.map(t => `
+    <div class="trow"><span>${t.done ? '✓' : '○'} ${t.name}</span></div>`).join('');
+  const feed = STATE.messages.map(m => `
+    <div class="trow"><span>${m.text}</span><span class="n">${m.time}</span></div>`).join('');
+  return `
+  <div class="vc">
+    <div class="top">
+      <h1>⚔ MyGame 指挥台</h1>
+      <span class="pl">${STATE.player.name} · ${STATE.player.title} Lv.${STATE.player.level}</span>
+      <div class="ap">行动点 ${STATE.ap}/${STATE.apMax}</div>
+    </div>
+    <div class="main">
+      <div class="col">
+        <div class="card gcard">
+          <div class="portrait">🏮</div>
+          <div class="meta"><b>${STATE.general.name}</b>Lv.${STATE.general.level} · ★${'★'.repeat(STATE.general.stars)}${'☆'.repeat(2-STATE.general.stars)}<br>兵力加成 +${Math.round(STATE.general.powerBonus*100)}%<br>带兵 ${STATE.general.maxTroops}</div>
+        </div>
+        <div class="card">
+          <h4>⚒ 部队编成</h4>
+          ${troops}
+          <div class="trow"><span>武器</span><span class="n">屠龙刀 (10阶)</span></div>
+        </div>
+        <div class="card">
+          <h4>🎖 养成</h4>
+          <div class="trow"><span>兵种解锁</span><span class="n">7/15</span></div>
+          <div class="bar"><i style="width:47%"></i></div>
+          <div class="trow"><span>武器强化</span><span class="n">10/20</span></div>
+          <div class="bar"><i style="width:50%"></i></div>
+        </div>
+      </div>
+      <div class="boardwrap">${gridHTML(30)}</div>
+      <div class="col">
+        <div class="card">
+          <h4>🗺 资源</h4>
+          <div class="trow"><span>粮草</span><span class="n">${STATE.res.food.toLocaleString()}</span></div>
+          <div class="trow"><span>铁材</span><span class="n">${STATE.res.iron.toLocaleString()}</span></div>
+          <div class="trow"><span>稀有材料</span><span class="n">${STATE.res.rare}</span></div>
+        </div>
+        <div class="card">
+          <h4>📜 战报</h4>
+          ${feed}
+        </div>
+        <div class="card">
+          <h4>🏆 任务</h4>
+          ${tasks}
+        </div>
+        <div class="card">
+          <h4>⛳ 军团</h4>
+          <div class="trow"><span>我方城池</span><span class="n">1</span></div>
+          <div class="trow"><span>军团成员</span><span class="n">—</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="bottom">
+      <button class="act">出征 <span class="cost">1 行动点</span></button>
+      <button class="act kind">招募</button>
+      <button class="act kind">打野 <span class="cost">2 行动点</span></button>
+      <button class="act kind">挑战</button>
+      <button class="act kind">攻城 <span class="cost">3 行动点</span></button>
+      <span class="apnote">行动点每 10 分钟恢复 1 点</span>
+    </div>
+  </div>`;
+}
+
+/* ---------- 渲染与切换 ---------- */
+const VARIANTS = [
+  { key: 'A', name: '水墨军务 · 经典SLG', render: variantA },
+  { key: 'B', name: '铁血沙场 · 沉浸RTS', render: variantB },
+  { key: 'C', name: '运筹帷幄 · 桌游指挥台', render: variantC },
+];
+
+let current = (new URLSearchParams(location.search).get('variant') || 'A').toUpperCase();
+if (!VARIANTS.some(v => v.key === current)) current = 'A';
+
+function render() {
+  const v = VARIANTS.find(x => x.key === current);
+  host.innerHTML = v.render();
+  swlabel.innerHTML = `${v.key} · ${v.name}`;
+  document.title = `MyGame UI 原型 — ${v.name}`;
+  window.scrollTo(0, 0);
+  history.replaceState(null, '', '?variant=' + current);
+}
+
+function cycle(dir) {
+  const i = VARIANTS.findIndex(x => x.key === current);
+  current = VARIANTS[(i + dir + VARIANTS.length) % VARIANTS.length].key;
+  render();
+}
+
+document.getElementById('prev').addEventListener('click', () => cycle(-1));
+document.getElementById('next').addEventListener('click', () => cycle(1));
+document.addEventListener('keydown', e => {
+  if (e.target.matches('input,textarea,[contenteditable]')) return;
+  if (e.key === 'ArrowLeft') cycle(-1);
+  if (e.key === 'ArrowRight') cycle(1);
+});
+document.getElementById('debugtoggle').addEventListener('click', () => {
+  const d = document.getElementById('debugdrawer');
+  d.classList.toggle('open');
+  document.getElementById('debugjson').textContent = JSON.stringify(STATE, null, 2);
+});
+
+render();
+</script>
+</body>
+</html>
