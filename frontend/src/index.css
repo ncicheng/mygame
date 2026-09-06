@@ -1,0 +1,73 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #10151c;
+  color: #e8e4d8;
+}
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 3rem 1rem;
+  gap: 2rem;
+}
+
+.app-header {
+  text-align: center;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 2rem;
+  letter-spacing: 0.4em;
+  color: #d9b36a;
+}
+
+.app-subtitle {
+  margin: 0.4rem 0 0;
+  color: #9aa0a6;
+}
+
+.health-card {
+  background: #1a212b;
+  border: 1px solid #2c3644;
+  border-radius: 10px;
+  padding: 1.5rem 2rem;
+  min-width: 300px;
+}
+
+.health-card h2 {
+  margin: 0 0 1rem;
+  font-size: 1rem;
+  color: #c9cdd4;
+}
+
+.health-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.5rem 1.5rem;
+  margin: 0;
+}
+
+.health-grid dt {
+  color: #9aa0a6;
+}
+
+.health-grid dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.health-error {
+  color: #e06c5d;
+}
+
+.health-loading {
+  color: #9aa0a6;
+}
