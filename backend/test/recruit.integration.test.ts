@@ -132,3 +132,33 @@ test('同兵种多次招募合并数量', { skip }, async () => {
   assert.equal(daodun?.soldierType, '刀盾手');
   assert.equal(daodun?.count, 8, '两次招募应合并为 8 名刀盾手');
 });
+
+test('并发招募不超额消耗基础资源：恰好一份资源下仅一次成功', { skip }, async () => {
+  const reg = await register(uniqueUsername(), 'secret123');
+  const token = reg.body.token as string;
+  const user = reg.body.user as UserProfile;
+  const generalId = user.generals[0].id;
+  const troop = getTroopType(3)!; // 刀盾手
+  const count = 10;
+  const needFood = troop.cost.food * count;
+  const needIron = troop.cost.iron * count;
+  const needGold = troop.cost.gold * count;
+  // 把资源调到恰好够一次招募：并发两份请求最多成功一份，绝不允许超额
+  await db!.query('UPDATE resources SET food = $1, iron = $2, gold = $3 WHERE user_id = $4', [
+    needFood,
+    needIron,
+    needGold,
+    user.id,
+  ]);
+
+  const results = await Promise.all([
+    postRecruit(token, { generalId, soldierLevel: 3, count }),
+    postRecruit(token, { generalId, soldierLevel: 3, count }),
+  ]);
+  const ok = results.filter((r) => r.status === 200).length;
+  assert.equal(ok, 1, '恰好一份资源下并发招募只应成功一次');
+  const res = await db!.query('SELECT food, iron, gold FROM resources WHERE user_id = $1', [user.id]);
+  const final = res.rows[0];
+  assert.ok(final.food >= 0 && final.iron >= 0 && final.gold >= 0, '资源不应为负');
+  assert.equal(final.food, 0, '成功一次后粮草应恰好为 0');
+});

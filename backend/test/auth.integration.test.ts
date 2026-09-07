@@ -63,6 +63,21 @@ test('注册时用户名被占用返回 409', { skip }, async () => {
   assert.equal(res.status, 409);
 });
 
+test('并发注册同名：仅一个成功，其余返回 409 而非 500', { skip }, async () => {
+  const username = uniqueUsername();
+  const results = await Promise.all([
+    register(username, 'secret123'),
+    register(username, 'secret123'),
+    register(username, 'secret123'),
+    register(username, 'secret123'),
+    register(username, 'secret123'),
+  ]);
+  const statuses = results.map((r) => r.status);
+  assert.equal(statuses.filter((s) => s === 201).length, 1, '仅一个注册成功');
+  assert.equal(statuses.filter((s) => s === 500).length, 0, '并发重名不应返回 500');
+  assert.equal(statuses.filter((s) => s === 409).length, 4, '其余应返回 409');
+});
+
 test('注册时密码以哈希存储（不存明文）', { skip }, async () => {
   const username = uniqueUsername();
   const password = 'plaintext-secret';

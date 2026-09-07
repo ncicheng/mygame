@@ -130,6 +130,12 @@ export async function fetchProfile(db: Db, userId: string): Promise<UserProfile>
   };
 }
 
+/** 是否为 Postgres 唯一约束冲突（SQLSTATE 23505），并附上冲突的约束名 */
+function uniqueViolation(err: unknown): { constraint?: string } | null {
+  const e = err as { code?: string; constraint?: string } | null;
+  return e?.code === '23505' ? e : null;
+}
+
 /** 注册：创建用户 + 初始武将/武器/部队 + 初始资源，签发会话 token */
 export async function register(db: Db, body: unknown): Promise<{ token: string; user: UserProfile }> {
   const { username, password } = parseCredentials(body);
@@ -139,14 +145,14 @@ export async function register(db: Db, body: unknown): Promise<{ token: string; 
     throw new AuthError(503, '服务暂不可用（未连接数据库）');
   }
 
+  // 快速路径：已有同名用户直接 409（并发窗口由下方事务内的唯一约束兜底）
   const existing = await db.query('SELECT id FROM users WHERE username = $1', [username]);
   if (existing.rows.length > 0) {
     throw new AuthError(409, '用户名已存在');
   }
 
-  // 进入默认世界并为其寻找出生点（主城 + 初始部队位置）
+  // 进入默认世界
   const worldId = await ensureDefaultWorld(db);
-  const start = await findPlayerStartTile(db, worldId);
 
   const userId = randomUUID();
   const weaponId = randomUUID();
@@ -155,64 +161,87 @@ export async function register(db: Db, body: unknown): Promise<{ token: string; 
   const token = newToken();
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
 
-  const client = await db.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query('INSERT INTO users (id, username, password_hash) VALUES ($1, $2, $3)', [
-      userId,
-      username,
-      passwordHash,
-    ]);
-    await client.query(
-      'INSERT INTO resources (user_id, food, iron, rare, gold) VALUES ($1, $2, $3, $4, $5)',
-      [
+  // 落位主城格可能与他人并发撞格，由 cities 唯一约束兜底：冲突则换格重试。
+  // 事务内：重名并发由 users 唯一约束兜底 → 捕获 23505 返回 409（而非 500）。
+  let placed = false;
+  for (let attempt = 0; attempt < 5 && !placed; attempt++) {
+    const start = await findPlayerStartTile(db, worldId);
+
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('INSERT INTO users (id, username, password_hash) VALUES ($1, $2, $3)', [
         userId,
-        STARTER_RESOURCES.food,
-        STARTER_RESOURCES.iron,
-        STARTER_RESOURCES.rare,
-        STARTER_RESOURCES.gold,
-      ],
-    );
-    await client.query('INSERT INTO weapons (id, user_id, name, tier, general_id) VALUES ($1, $2, $3, $4, $5)', [
-      weaponId,
-      userId,
-      STARTER_WEAPON.name,
-      STARTER_WEAPON.tier,
-      generalId,
-    ]);
-    await client.query(
-      'INSERT INTO generals (id, user_id, name, level, stars, weapon_id, world_id, x, y) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
-      [generalId, userId, STARTER_GENERAL.name, STARTER_GENERAL.level, 1, weaponId, worldId, start.x, start.y],
-    );
-    for (const unit of STARTER_ARMY) {
+        username,
+        passwordHash,
+      ]);
       await client.query(
-        'INSERT INTO army_units (id, general_id, soldier_type, soldier_level, count) VALUES ($1, $2, $3, $4, $5)',
-        [randomUUID(), generalId, unit.soldierType, unit.soldierLevel, unit.count],
+        'INSERT INTO resources (user_id, food, iron, rare, gold) VALUES ($1, $2, $3, $4, $5)',
+        [
+          userId,
+          STARTER_RESOURCES.food,
+          STARTER_RESOURCES.iron,
+          STARTER_RESOURCES.rare,
+          STARTER_RESOURCES.gold,
+        ],
       );
+      // 先建武将（weapon_id 置空），再建武器、再回填武将武器外键：
+      // 保证 weapons.general_id → generals(id) 外键可满足（两者互为外键，只能错序补齐）。
+      await client.query(
+        'INSERT INTO generals (id, user_id, name, level, stars, weapon_id, world_id, x, y) VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, $8)',
+        [generalId, userId, STARTER_GENERAL.name, STARTER_GENERAL.level, 1, worldId, start.x, start.y],
+      );
+      await client.query('INSERT INTO weapons (id, user_id, name, tier, general_id) VALUES ($1, $2, $3, $4, $5)', [
+        weaponId,
+        userId,
+        STARTER_WEAPON.name,
+        STARTER_WEAPON.tier,
+        generalId,
+      ]);
+      await client.query('UPDATE generals SET weapon_id = $1 WHERE id = $2', [weaponId, generalId]);
+      for (const unit of STARTER_ARMY) {
+        await client.query(
+          'INSERT INTO army_units (id, general_id, soldier_type, soldier_level, count) VALUES ($1, $2, $3, $4, $5)',
+          [randomUUID(), generalId, unit.soldierType, unit.soldierLevel, unit.count],
+        );
+      }
+      // 主城与行动点：新玩家满行动点入场
+      await client.query(
+        'INSERT INTO cities (id, world_id, x, y, name, owner_user_id) VALUES ($1, $2, $3, $4, $5, $6)',
+        [randomUUID(), worldId, start.x, start.y, `${username}的主城`, userId],
+      );
+      await client.query('INSERT INTO action_points (user_id, current, max) VALUES ($1, $2, $3)', [
+        userId,
+        AP_MAX,
+        AP_MAX,
+      ]);
+      // 养成进度：初始解锁低阶兵种（1-3 级），更高阶需消耗稀有材料逐级解锁
+      await client.query('INSERT INTO progression (user_id, troop_max_unlocked) VALUES ($1, $2)', [userId, 3]);
+      await client.query('INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3)', [
+        token,
+        userId,
+        expiresAt,
+      ]);
+      await client.query('COMMIT');
+      placed = true;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      const violation = uniqueViolation(err);
+      if (violation?.constraint === 'users_username_key') {
+        // 并发重名：唯一约束兜底 → 明确返回 409，而非未预期的 500
+        throw new AuthError(409, '用户名已存在');
+      }
+      if (violation?.constraint === 'cities_world_id_x_y_key') {
+        continue; // 与他人并发撞落位格：换格重试
+      }
+      throw err;
+    } finally {
+      client.release();
     }
-    // 主城与行动点：新玩家满行动点入场
-    await client.query(
-      'INSERT INTO cities (id, world_id, x, y, name, owner_user_id) VALUES ($1, $2, $3, $4, $5, $6)',
-      [randomUUID(), worldId, start.x, start.y, `${username}的主城`, userId],
-    );
-    await client.query('INSERT INTO action_points (user_id, current, max) VALUES ($1, $2, $3)', [
-      userId,
-      AP_MAX,
-      AP_MAX,
-    ]);
-    // 养成进度：初始解锁低阶兵种（1-3 级），更高阶需消耗稀有材料逐级解锁
-    await client.query('INSERT INTO progression (user_id, troop_max_unlocked) VALUES ($1, $2)', [userId, 3]);
-    await client.query('INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3)', [
-      token,
-      userId,
-      expiresAt,
-    ]);
-    await client.query('COMMIT');
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
+  }
+
+  if (!placed) {
+    throw new AuthError(500, '世界已无可用落点，注册失败');
   }
 
   const user = await fetchProfile(db, userId);

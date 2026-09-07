@@ -59,7 +59,8 @@ const CREATE_TABLES: readonly string[] = [
      y INTEGER NOT NULL,
      name TEXT NOT NULL,
      owner_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+     UNIQUE (world_id, x, y)
    )`,
   `CREATE TABLE IF NOT EXISTS wildlands (
      id TEXT PRIMARY KEY,
@@ -169,6 +170,10 @@ export async function ensureSchema(db: Db): Promise<void> {
       await ensureWildlandRefreshColumns(client);
       // 旧库补齐武将星级列（养成任务新增，CREATE TABLE IF NOT EXISTS 不会给已存在表加列）
       await ensureGeneralsStarsColumn(client);
+      // 旧库补齐城池 (world_id, x, y) 唯一约束（防并发注册同格；CREATE TABLE 不会给已存在表加约束）
+      await ensureCitiesTileUnique(client);
+      // 旧库补齐 weapons.general_id 外键（CREATE TABLE 顺序不便建循环外键，迁移时补）
+      await ensureWeaponsGeneralFk(client);
     } finally {
       await client.query('SELECT pg_advisory_unlock(7263)');
     }
@@ -270,4 +275,55 @@ export async function ensureWildlandRefreshColumns(client: PoolClient): Promise<
  * ADD COLUMN IF NOT EXISTS 天然幂等，直接执行即可。 */
 export async function ensureGeneralsStarsColumn(client: PoolClient): Promise<void> {
   await client.query('ALTER TABLE generals ADD COLUMN IF NOT EXISTS stars INTEGER NOT NULL DEFAULT 1');
+}
+
+/** 幂等补齐 cities 的 UNIQUE (world_id, x, y) 约束：
+ * 旧库缺该约束时，并发注册可能把两名玩家放到同一格。
+ * 缺失时先清理同格重复城池（保留 created_at 最早的一城，其余删除），再补唯一约束。 */
+export async function ensureCitiesTileUnique(client: PoolClient): Promise<void> {
+  const has = await client.query(
+    `SELECT 1 FROM pg_constraint
+     WHERE conname = $1 AND conrelid = 'cities'::regclass`,
+    ['cities_world_id_x_y_key'],
+  );
+  if (has.rowCount) {
+    return; // 已存在，幂等跳过
+  }
+  // 删除每组 (world_id, x, y) 中保留行（created_at 最早、并列取 id 最小）之外的重复城池
+  await client.query(
+    `DELETE FROM cities c
+     USING cities d
+     WHERE c.world_id = d.world_id AND c.x = d.x AND c.y = d.y
+       AND (c.created_at > d.created_at OR (c.created_at = d.created_at AND c.id > d.id))`,
+  );
+  // 补唯一约束（约束名为固定常量，非用户输入，可直接拼接）
+  await client.query(
+    `ALTER TABLE cities
+     ADD CONSTRAINT cities_world_id_x_y_key UNIQUE (world_id, x, y)`,
+  );
+}
+
+/** 幂等补齐 weapons.general_id 的外键：武器应归属某武将。
+ * CREATE_TABLES 里 weapons 先于 generals 建表，无法在 DDL 里声明循环外键，
+ * 故在各表都建成后经此函数补齐。缺失时先把指向不存在武将的孤儿武器置空，再加外键。 */
+export async function ensureWeaponsGeneralFk(client: PoolClient): Promise<void> {
+  const has = await client.query(
+    `SELECT 1 FROM pg_constraint
+     WHERE conname = $1 AND conrelid = 'weapons'::regclass`,
+    ['weapons_general_id_fkey'],
+  );
+  if (has.rowCount) {
+    return; // 已存在，幂等跳过
+  }
+  // 清理孤儿：general_id 指向不存在武将的武器 → 置空（避免加外键失败）
+  await client.query(
+    `UPDATE weapons SET general_id = NULL
+      WHERE general_id IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM generals WHERE id = weapons.general_id)`,
+  );
+  // 补外键（约束名为固定常量，非用户输入，可直接拼接）
+  await client.query(
+    `ALTER TABLE weapons
+     ADD CONSTRAINT weapons_general_id_fkey FOREIGN KEY (general_id) REFERENCES generals(id) ON DELETE SET NULL`,
+  );
 }

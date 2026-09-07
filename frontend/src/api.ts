@@ -15,7 +15,9 @@ import type {
 
 // 生产环境（GitHub Pages）通过构建时注入 VITE_API_BASE_URL 指向后端地址；
 // 开发环境由 Vite 代理 /api 到本地后端，留空即可。
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';
+// 防御式读取：非 Vite 运行时（如 node 单测）import.meta.env 可能未定义，收敛为空串（同源）。
+export const API_BASE =
+  (import.meta as unknown as { env?: { VITE_API_BASE_URL?: string } }).env?.VITE_API_BASE_URL ?? '';
 
 /** 带状态码的 API 错误，message 为后端返回的可读错误 */
 export class ApiError extends Error {

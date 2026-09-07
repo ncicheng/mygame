@@ -106,13 +106,16 @@ export function findStartTile(
   return null;
 }
 
-/** 确保默认世界存在：不存在则生成地形并预置敌方城池与野地，返回世界 id */
+/** 确保默认世界存在：不存在则生成地形并预置敌方城池与野地，返回世界 id。
+ * 用事务级 advisory lock 串行化「查无→建库」窗口：并发首次请求只会建出同一个默认世界，
+ * 避免玩家被拆分到不同世界。 */
 export async function ensureDefaultWorld(db: Db, config: WorldConfig = WORLD_CONFIG): Promise<string> {
   await ensureSchema(db);
   if (!db) {
     throw new WorldError(503, '服务暂不可用（未连接数据库）');
   }
 
+  // 快速路径：已有默认世界则直接返回（避免无谓的建库锁竞争）
   const existing = await db.query('SELECT id FROM worlds ORDER BY created_at LIMIT 1');
   if (existing.rows.length > 0) {
     return existing.rows[0].id as string;
@@ -145,6 +148,16 @@ export async function ensureDefaultWorld(db: Db, config: WorldConfig = WORLD_CON
   const client = await db.connect();
   try {
     await client.query('BEGIN');
+    // 事务级锁持有到 COMMIT/ROLLBACK，串行化默认世界的创建窗口
+    await client.query('SELECT pg_advisory_xact_lock(7264)');
+
+    // 锁内复查：可能已有别的请求刚建出默认世界，直接复用
+    const recheck = await client.query('SELECT id FROM worlds ORDER BY created_at LIMIT 1');
+    if (recheck.rows.length > 0) {
+      await client.query('COMMIT');
+      return recheck.rows[0].id as string;
+    }
+
     await client.query('INSERT INTO worlds (id, name, width, height, seed) VALUES ($1, $2, $3, $4, $5)', [
       worldId,
       config.name,

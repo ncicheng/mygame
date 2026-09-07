@@ -5,7 +5,9 @@ import { randomUUID } from 'node:crypto';
 import { createDb } from '../src/db.js';
 import { createApp } from '../src/app.js';
 import { AP_MAX, ACTION_COSTS, type WorldStateResponse } from '@mygame/shared';
-import { trySpendActionPoints } from '../src/actionPoints.js';
+import { getActionPoints, trySpendActionPoints } from '../src/actionPoints.js';
+import { ensureDefaultWorld } from '../src/world.js';
+import { Client } from 'pg';
 
 // 集成测试：必须连真实本地 Postgres 才算通过（run-integration.mjs 用 embedded-postgres 提供）
 const databaseUrl = process.env.DATABASE_URL;
@@ -110,4 +112,81 @@ test('行动点消耗：足额时扣减成功，耗尽后不能透支', { skip }
   }
   // 第 6 次应失败（已耗尽）
   assert.equal(await trySpendActionPoints(db!, userId, ACTION_COSTS.march), false);
+});
+
+test('行动点并发消耗原子性：多路并发扣减不超花', { skip }, async () => {
+  const reg = await register(uniqueUsername(), 'secret123');
+  const userId = reg.body.user.id as string;
+
+  const cost = 2;
+  const results = await Promise.all(
+    Array.from({ length: 5 }, () => trySpendActionPoints(db!, userId, cost)),
+  );
+  const succeeded = results.filter(Boolean).length;
+  // 5 点每次扣 2：最多 floor(5/2)=2 次成功，绝不允许并发下全部按「读到相同余额」各自成功
+  assert.equal(succeeded, Math.floor(AP_MAX / cost), '并发扣减应只允许足额次数成功');
+  const { rows } = await db!.query('SELECT current FROM action_points WHERE user_id = $1', [userId]);
+  assert.equal(rows[0].current, AP_MAX - succeeded * cost, '余额应为原值减成功次数 × 成本');
+});
+
+test('事务内行动点扣减随回滚撤销：ROLLBACK 后行动点不变', { skip }, async () => {
+  const reg = await register(uniqueUsername(), 'secret123');
+  const userId = reg.body.user.id as string;
+  const before = (await getActionPoints(db!, userId)).current;
+
+  const client = await db!.connect();
+  try {
+    await client.query('BEGIN');
+    assert.equal(await trySpendActionPoints(client, userId, ACTION_COSTS.march), true);
+    await client.query('ROLLBACK');
+  } finally {
+    client.release();
+  }
+  const after = (await getActionPoints(db!, userId)).current;
+  assert.equal(after, before, '回滚后行动点应还原');
+});
+
+test('并发首次引导（独立数据库）：默认世界不分裂、玩家落位不同格', { skip }, async () => {
+  const baseUrl = process.env.DATABASE_URL!;
+  const dbName = `bs_${randomUUID().slice(0, 8)}`;
+  const admin = new Client({ connectionString: baseUrl });
+  await admin.connect();
+  await admin.query(`CREATE DATABASE ${dbName}`);
+  await admin.end();
+
+  const bsUrl = new URL(baseUrl);
+  bsUrl.pathname = `/${dbName}`;
+  const bsDb = createDb(bsUrl.toString());
+  const bsApp = createApp({ db: bsDb });
+
+  try {
+    // 并发首次引导默认世界：应只建出一个世界
+    const worldIds = await Promise.all([
+      ensureDefaultWorld(bsDb!),
+      ensureDefaultWorld(bsDb!),
+      ensureDefaultWorld(bsDb!),
+    ]);
+    assert.equal(new Set(worldIds).size, 1, '并发首次建默认世界应得到同一世界');
+
+    // 并发注册两名玩家：同一世界、不同落格
+    const [a, b] = await Promise.all([
+      request(bsApp).post('/api/auth/register').send({ username: `a${randomUUID().slice(0, 8)}`, password: 'secret123' }),
+      request(bsApp).post('/api/auth/register').send({ username: `b${randomUUID().slice(0, 8)}`, password: 'secret123' }),
+    ]);
+    assert.equal(a.status, 201);
+    assert.equal(b.status, 201);
+
+    const wa = (await request(bsApp).get('/api/world').set('Authorization', `Bearer ${a.body.token}`)).body as WorldStateResponse;
+    const wb = (await request(bsApp).get('/api/world').set('Authorization', `Bearer ${b.body.token}`)).body as WorldStateResponse;
+    assert.equal(wa.world.id, wb.world.id, '两名玩家应处于同一默认世界');
+    const myA = wa.armies.find((x) => x.side === 'me')!;
+    const myB = wb.armies.find((x) => x.side === 'me')!;
+    assert.notDeepEqual([myA.x, myA.y], [myB.x, myB.y], '两名玩家不应落在同一格');
+  } finally {
+    await bsDb?.end();
+    const drop = new Client({ connectionString: baseUrl });
+    await drop.connect();
+    await drop.query(`DROP DATABASE ${dbName}`);
+    await drop.end();
+  }
 });

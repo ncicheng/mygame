@@ -67,30 +67,31 @@ export async function recruit(
     throw new RecruitError(400, '兵种未解锁');
   }
 
-  const resRes = await db.query('SELECT food, iron, gold FROM resources WHERE user_id = $1', [userId]);
-  const have = resRes.rows[0] as { food: number; iron: number; gold: number };
   const needFood = troop.cost.food * count;
   const needIron = troop.cost.iron * count;
   const needGold = troop.cost.gold * count;
-  if (have.food < needFood || have.iron < needIron || have.gold < needGold) {
-    throw new RecruitError(400, '基础资源不足，无法招募');
-  }
 
-  const spent = await trySpendActionPoints(db, userId, ACTION_COSTS.recruit);
-  if (!spent) {
-    throw new RecruitError(400, '行动点不足');
-  }
-
-  // 事务：扣资源 + 兵加入部队（同兵种合并数量）
+  // 单事务：扣行动点 + 原子扣资源 + 兵加入部队。任一步失败整体回滚，
+  // 不会出现「扣了行动点/资源但部队未建成」或并发招募超额消耗的脱节。
   const client = await db.connect();
   try {
     await client.query('BEGIN');
-    await client.query('UPDATE resources SET food = food - $1, iron = iron - $2, gold = gold - $3 WHERE user_id = $4', [
-      needFood,
-      needIron,
-      needGold,
-      userId,
-    ]);
+
+    const spent = await trySpendActionPoints(client, userId, ACTION_COSTS.recruit);
+    if (!spent) {
+      throw new RecruitError(400, '行动点不足');
+    }
+
+    // 原子扣资源：条件 UPDATE 只在余额足额时扣减，并发招募不会超额消耗
+    const res = await client.query(
+      `UPDATE resources SET food = food - $1, iron = iron - $2, gold = gold - $3
+       WHERE user_id = $4 AND food >= $1 AND iron >= $2 AND gold >= $3`,
+      [needFood, needIron, needGold, userId],
+    );
+    if (res.rowCount === 0) {
+      throw new RecruitError(400, '基础资源不足，无法招募');
+    }
+
     await client.query(
       `INSERT INTO army_units (id, general_id, soldier_type, soldier_level, count)
        VALUES ($1, $2, $3, $4, $5)

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { io } from 'socket.io-client';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ActionPoints, BattleReport, UserProfile, WorldArmy, WorldStateResponse } from '@mygame/shared';
 import { apiBattleReports, apiCancelMarch, apiMarch, apiWorld } from './api';
+import { createRealtimeSocket } from './realtime';
 import { ActionDeck } from './ActionDeck';
 import { BattleOverlay } from './BattleOverlay';
 import { LeftColumn } from './LeftColumn';
@@ -67,8 +67,10 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
 
   // 实时渲染：订阅服务器世界时钟推送的行军位置，逐格移动。
   // 连接时携带 token，服务端据此把 socket 归入其所在世界的房间（只收本世界推送）。
-  const socket = useMemo(() => io({ auth: { token } }), [token]);
+  // 连接地址与 fetch 同用 API_BASE；每次渲染/重挂载创建全新 socket 实例，
+  // 避免 StrictMode 下复用已被 disconnect 且无法重连的缓存实例。
   useEffect(() => {
+    const socket = createRealtimeSocket(token);
     socket.on('march:update', (updates: MarchUpdate[]) => {
       setWorld((w) => {
         if (!w) {
@@ -87,7 +89,7 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
     return () => {
       socket.disconnect();
     };
-  }, [socket]);
+  }, [token]);
 
   // 同步结算：存在行军时周期性刷新，让到达（行军信息清除）与取消能落到界面
   useEffect(() => {
