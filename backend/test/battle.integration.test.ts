@@ -86,6 +86,13 @@ test('行军至野地胜利：战斗实例创建、掉落稀有材料、战报�
   assert.equal(report.wildlandName, wl.name);
   assert.ok(report.log.attackerWon, '战报日志应标记攻击方胜利');
   assert.ok(report.log.rounds.length > 0, '战报应含播放回合序列');
+  // 威吓自动释放：攻击方战力(远大于 1)不低于守方 → 技能应真正生效并写入
+  assert.equal(report.log.skillUsed, true, '攻击方战力不低于守方时应自动释放威吓');
+  const inst = await db!.query(
+    'SELECT skill_used FROM battle_instances WHERE defender_wildland_id = $1 AND attacker_general_id = $2 ORDER BY created_at DESC LIMIT 1',
+    [wl.id, generalId],
+  );
+  assert.equal(inst.rows[0].skill_used, true, 'battle_instances 应持久化 skill_used = true');
 
   // 稀有材料掉落：强度 1 → 掉落 1
   const me2 = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${token}`);
@@ -127,6 +134,7 @@ test('战败：武将重伤回城（不掉级）、兵战损落库、不掉稀�
   const reports = (await getReports(token)).body as BattleReportsResponse;
   assert.equal(reports.reports[0].victory, false, '战报应标记失败');
   assert.equal(reports.reports[0].droppedRare, 0, '战败不掉落稀有材料');
+  assert.equal(reports.reports[0].log.skillUsed, false, '攻击方战力低于守方时威吓不释放');
 
   // 野地未被攻破
   const wlRes = await db!.query('SELECT defeated_at FROM wildlands WHERE id = $1', [wl.id]);

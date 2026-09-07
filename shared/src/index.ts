@@ -163,6 +163,10 @@ export const AP_RECOVER_MS = 10 * 60 * 1000;
 /** 行动点消耗规则（出征/招募/打野/攻城），招募 Task 4 起使用 */
 export const ACTION_COSTS = { march: 1, recruit: 1, bandit: 2, siege: 3 } as const;
 
+/** 打野一次完整消耗：出征（行军）1 + 战斗 2 = 3 行动点。前端打野按钮据此置灰，
+ * 避免行动点在 2~3 之间时出征成功但战斗扣点失败（best-effort 仍结算）的断头体验。 */
+export const BANDIT_TOTAL_AP = ACTION_COSTS.march + ACTION_COSTS.bandit;
+
 /** 行军速度：每走过一格耗时（毫秒）。20×14 小地图下 1.5s/格，数秒可达相邻目标 */
 export const MARCH_TILE_MS = 1500;
 
@@ -241,6 +245,7 @@ export {
   generalSidePower,
   winProbability,
   resolveCombat,
+  shouldReleaseSkill,
   wildlandDrop,
 } from './combat.js';
 export type {

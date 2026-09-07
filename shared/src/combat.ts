@@ -119,6 +119,16 @@ function casualties(count: number, rate: number): number {
   return Math.floor(count * rate);
 }
 
+/**
+ * 威吓自动释放规则（确定性）：攻击方战力不低于守方时释放。
+ * 占优/均势时震慑敌军，为攻击方战力提供 SKILL_POWER_BOOST 加成。
+ * 服务器据此在结算时确定性决定技能是否生效，前后端可一致复现；
+ * 手动释放时机留给养成任务，当前为自动释放的服务器权威效果。
+ */
+export function shouldReleaseSkill(attackerPower: number, defenderPower: number): boolean {
+  return attackerPower >= defenderPower;
+}
+
 /** 结算一场战斗（纯函数、种子驱动）；返回完整结果与播放用回合序列 */
 export function resolveCombat(opts: {
   attackerPower: number;

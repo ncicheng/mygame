@@ -11,6 +11,7 @@ import {
   WINNER_CASUALTY_RATE,
   generalSidePower,
   resolveCombat,
+  shouldReleaseSkill,
   wildlandDrop,
   type BattleReport,
   type CombatResult,
@@ -135,6 +136,8 @@ export async function resolveArrivalBattle(
     attackerCount,
     defenderCount,
     seed: seedFromString(args.marchId),
+    // 服务器权威决定技能是否自动释放（确定性规则），并随战斗写入战报与实例
+    skillUsed: shouldReleaseSkill(attackerPower, defenderPower),
   });
 
   // 打野消耗行动点（行军已消耗出征点，此为战斗消耗；不足时仍照常结算）

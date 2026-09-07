@@ -1,10 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  ACTION_COSTS,
+  BANDIT_TOTAL_AP,
+  SKILL_POWER_BOOST,
   armyPower,
   generalMultiplier,
   generalSidePower,
   resolveCombat,
+  shouldReleaseSkill,
   weaponBonus,
   winProbability,
   wildlandDrop,
@@ -100,6 +104,23 @@ test('不同种子在均势时可得出不同胜者（随机性由种子驱动�
     winners.add(r.attackerWon);
   }
   assert.ok(winners.has(true) && winners.has(false), '均势下不同种子应出现不同胜者');
+});
+
+test('威吓自动释放规则：攻击方战力不低于守方时确定性释放', () => {
+  assert.equal(shouldReleaseSkill(150, 150), true, '均势应释放');
+  assert.equal(shouldReleaseSkill(200, 150), true, '占优应释放');
+  assert.equal(shouldReleaseSkill(100, 150), false, '劣势不释放');
+});
+
+test('威吓释放：攻击方战力按 SKILL_POWER_BOOST 提升并写入结果', () => {
+  const result = resolveCombat({ attackerPower: 100, defenderPower: 100, attackerCount: 100, defenderCount: 100, seed: 1, skillUsed: true });
+  assert.equal(result.skillUsed, true);
+  assert.equal(result.attacker.power, Math.round(100 * (1 + SKILL_POWER_BOOST)), '释放后攻击方战力应含技能加成');
+});
+
+test('打野总行动点门槛：出征 1 + 战斗 2 = 3，前端据此置灰', () => {
+  assert.equal(BANDIT_TOTAL_AP, ACTION_COSTS.march + ACTION_COSTS.bandit);
+  assert.ok(BANDIT_TOTAL_AP > ACTION_COSTS.bandit, '总消耗应大于单次战斗消耗，否则门槛失效');
 });
 
 test('野地稀有材料掉落：按守军强度换算，至少 1', () => {

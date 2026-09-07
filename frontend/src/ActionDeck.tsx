@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ACTION_COSTS, type ActionPoints } from '@mygame/shared';
+import { ACTION_COSTS, BANDIT_TOTAL_AP, type ActionPoints } from '@mygame/shared';
 
 interface ActionDeckProps {
   ap: ActionPoints;
@@ -27,7 +27,7 @@ interface DeckAction {
 const ACTIONS: readonly DeckAction[] = [
   { key: 'march', label: '出征', cost: ACTION_COSTS.march, kind: false, hint: '点击我方部队选择出发，再点目标格下达行军命令' },
   { key: 'recruit', label: '招募', cost: ACTION_COSTS.recruit, kind: true, hint: '消耗基础资源与行动点，为武将补充兵卒' },
-  { key: 'bandit', label: '打野', cost: ACTION_COSTS.bandit, kind: true, hint: '攻打山贼营地，胜利掉落稀有材料' },
+  { key: 'bandit', label: '打野', cost: BANDIT_TOTAL_AP, kind: true, hint: '攻打山贼营地（出征 1 + 战斗 2 = 3 行动点），胜利掉落稀有材料' },
   { key: 'challenge', label: '挑战', cost: 0, kind: true, hint: '「挑战」对战将在后续迭代开放' },
   { key: 'siege', label: '攻城', cost: ACTION_COSTS.siege, kind: true, hint: '「攻城」军团战将在后续迭代开放' },
 ];

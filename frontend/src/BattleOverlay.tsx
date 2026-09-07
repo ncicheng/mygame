@@ -102,13 +102,17 @@ export function BattleOverlay({ report, onClose }: BattleOverlayProps) {
           </div>
         </div>
 
-        {/* 武将技能窗口 */}
+        {/* 武将技能窗口：反映服务器权威结算的实际释放结果 */}
         <div className="battle-skill">
           <span>🎯 技能窗口</span>
           <button type="button" className="act kind" disabled>
-            威吓（战前已自动释放）
+            {log.skillUsed ? '威吓（已释放，战力 +10%）' : '威吓（本场未释放）'}
           </button>
-          <span className="hint">MVP 阶段武将技能由服务器在结算时生效，此处展示已用技能。</span>
+          <span className="hint">
+            {log.skillUsed
+              ? '武将技能由服务器在结算时自动释放（攻击方战力不低于守方时触发）。手动释放时机将在养成任务开放。'
+              : '本场攻击方战力低于守方，威吓未触发。手动释放时机将在养成任务开放。'}
+          </span>
         </div>
 
         {/* 战报明细 */}
