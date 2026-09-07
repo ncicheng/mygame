@@ -1,7 +1,11 @@
 import type { Db } from './db.js';
+import type { PoolClient } from 'pg';
 
 /** 已初始化过的连接池，避免每次请求重跑建表语句 */
 const ensured = new WeakSet<object>();
+
+/** army_units 同兵种唯一约束名，与 CREATE TABLE 的自动命名保持一致 */
+const ARMY_UNITS_UNIQUE_KEY = 'army_units_general_id_soldier_level_key';
 
 const CREATE_TABLES: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS users (
@@ -104,6 +108,8 @@ export async function ensureSchema(db: Db): Promise<void> {
       for (const sql of CREATE_TABLES) {
         await client.query(sql);
       }
+      // 旧库补齐 army_units 唯一约束（CREATE TABLE IF NOT EXISTS 不会给已存在表加约束）
+      await ensureArmyUnitsConstraint(client);
     } finally {
       await client.query('SELECT pg_advisory_unlock(7263)');
     }
@@ -111,4 +117,46 @@ export async function ensureSchema(db: Db): Promise<void> {
     client.release();
   }
   ensured.add(db);
+}
+
+/** 幂等补齐 army_units 的 UNIQUE (general_id, soldier_level) 约束。
+ * 旧库由早期 schema 创建时缺该约束，会让 recruit 的
+ * ON CONFLICT (general_id, soldier_level) 在运行时抛错。
+ * 缺失时先合并重复行（同兵种数量求和保留一行），再补约束。
+ */
+export async function ensureArmyUnitsConstraint(client: PoolClient): Promise<void> {
+  const has = await client.query(
+    `SELECT 1 FROM pg_constraint
+     WHERE conname = $1 AND conrelid = 'army_units'::regclass`,
+    [ARMY_UNITS_UNIQUE_KEY],
+  );
+  if (has.rowCount) {
+    return; // 已存在，幂等跳过
+  }
+  // 把每组 (general_id, soldier_level) 重复行的数量求和写入保留行
+  await client.query(
+    `UPDATE army_units a
+     SET count = (
+       SELECT sum(u.count) FROM army_units u
+       WHERE u.general_id = a.general_id AND u.soldier_level = a.soldier_level
+     )
+     WHERE a.id IN (
+       SELECT min(id) FROM army_units
+       GROUP BY general_id, soldier_level
+       HAVING count(*) > 1
+     )`,
+  );
+  // 删除每组除保留行（id 最小）外的重复行
+  await client.query(
+    `DELETE FROM army_units a
+     USING army_units b
+     WHERE a.general_id = b.general_id
+       AND a.soldier_level = b.soldier_level
+       AND a.id > b.id`,
+  );
+  // 补唯一约束（约束名为固定常量，非用户输入，可直接拼接）
+  await client.query(
+    `ALTER TABLE army_units
+     ADD CONSTRAINT ${ARMY_UNITS_UNIQUE_KEY} UNIQUE (general_id, soldier_level)`,
+  );
 }
