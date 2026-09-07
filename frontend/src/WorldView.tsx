@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
-import type { ActionPoints, UserProfile, WorldArmy, WorldStateResponse } from '@mygame/shared';
-import { apiCancelMarch, apiMarch, apiWorld } from './api';
+import type { ActionPoints, BattleReport, UserProfile, WorldArmy, WorldStateResponse } from '@mygame/shared';
+import { apiBattleReports, apiCancelMarch, apiMarch, apiWorld } from './api';
 import { ActionDeck } from './ActionDeck';
+import { BattleOverlay } from './BattleOverlay';
 import { LeftColumn } from './LeftColumn';
 import { MapBoard, describeCell, type MapCell } from './MapBoard';
 import { RecruitModal } from './RecruitModal';
@@ -31,10 +32,15 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
   const [selected, setSelected] = useState<MapCell | null>(null);
   const [recruiting, setRecruiting] = useState(false);
   const [marchMode, setMarchMode] = useState(false);
+  const [banditMode, setBanditMode] = useState(false);
   const [marchArmyId, setMarchArmyId] = useState<string | null>(null);
   const [marchMsg, setMarchMsg] = useState<string | null>(null);
   const [marchErr, setMarchErr] = useState<string | null>(null);
   const [marching, setMarching] = useState(false);
+  const [reports, setReports] = useState<BattleReport[]>([]);
+  const [activeReport, setActiveReport] = useState<BattleReport | null>(null);
+  const pendingBattleRef = useRef(false);
+  const lastAutoReportRef = useRef<string | null>(null);
 
   // 首次加载世界
   useEffect(() => {
@@ -99,8 +105,36 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
     return () => clearInterval(id);
   }, [world, token]);
 
+  // 战报轮询：刷新战报卡；刚发起打野后，若出现新战报则自动打开战斗回放
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await apiBattleReports(token);
+        if (cancelled) {
+          return;
+        }
+        setReports(res.reports);
+        const newest = res.reports[0];
+        if (newest && newest.id !== lastAutoReportRef.current && pendingBattleRef.current) {
+          lastAutoReportRef.current = newest.id;
+          pendingBattleRef.current = false;
+          setActiveReport(newest);
+        }
+      } catch {
+        // 拉取失败静默，下一轮再试
+      }
+    };
+    void poll();
+    const id = setInterval(poll, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [token]);
+
   const issueMarch = useCallback(
-    async (target: MapCell) => {
+    async (target: MapCell, attack: boolean) => {
       if (!marchArmyId || marching) {
         return;
       }
@@ -108,6 +142,10 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
       setMarching(true);
       try {
         const res = await apiMarch(token, { generalId, targetX: target.x, targetY: target.y });
+        if (attack) {
+          // 打野行军：到达后触发战斗，预期会产生新战报 → 标记以便自动打开回放
+          pendingBattleRef.current = true;
+        }
         setWorld((w) => {
           if (!w) {
             return w;
@@ -119,8 +157,9 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
           };
         });
         setMarchMode(false);
+        setBanditMode(false);
         setMarchArmyId(null);
-        setMarchMsg(`「${target.x},${target.y}」行军已发布`);
+        setMarchMsg(`「${target.x},${target.y}」${attack ? '打野出征' : '行军'}已发布`);
         setMarchErr(null);
       } catch (err: unknown) {
         setMarchErr(err instanceof Error ? err.message : String(err));
@@ -133,28 +172,32 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
 
   const handleCellClick = useCallback(
     (cell: MapCell) => {
-      if (marchMode && marchArmyId) {
-        void issueMarch(cell);
+      if ((marchMode || banditMode) && marchArmyId) {
+        if (banditMode && !cell.markers.some((m) => m.kind === 'bandit')) {
+          setMarchErr('请选择野地（山贼营地）目标格发起攻打');
+          return;
+        }
+        void issueMarch(cell, banditMode);
         return;
       }
       setSelected(cell);
       setMarchErr(null);
     },
-    [marchMode, marchArmyId, issueMarch],
+    [marchMode, banditMode, marchArmyId, issueMarch],
   );
 
   const handleArmyClick = useCallback(
     (army: WorldArmy) => {
       setSelected(null);
-      if (marchMode) {
+      if (marchMode || banditMode) {
         setMarchArmyId(army.id);
-        setMarchMsg(`已选择「${army.generalName}」，点击地图目标格下达行军`);
+        setMarchMsg(banditMode ? `已选择「${army.generalName}」，点击野地目标攻打` : `已选择「${army.generalName}」，点击地图目标格下达行军`);
         setMarchErr(null);
       } else {
         setMarchMsg(`已选中「${army.generalName}」，可查看行军或先出征`);
       }
     },
-    [marchMode],
+    [marchMode, banditMode],
   );
 
   const handleCancelMarch = useCallback(
@@ -255,7 +298,7 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
           {marchErr && <div className="march-err">{marchErr}</div>}
         </section>
         <aside className="col">
-          <RightColumn user={user} world={world} />
+          <RightColumn user={user} world={world} reports={reports} onOpenReport={setActiveReport} />
         </aside>
       </div>
       <footer className="vc-bottom">
@@ -264,10 +307,18 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
           onRecruit={() => setRecruiting(true)}
           onMarch={() => {
             setMarchMode((m) => !m);
+            setBanditMode(false);
+            setMarchArmyId(null);
+            setMarchErr(null);
+          }}
+          onBandit={() => {
+            setBanditMode((m) => !m);
+            setMarchMode(false);
             setMarchArmyId(null);
             setMarchErr(null);
           }}
           marchMode={marchMode}
+          banditMode={banditMode}
         />
       </footer>
       {recruiting && (
@@ -279,6 +330,7 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
           onRecruited={handleRecruited}
         />
       )}
+      {activeReport && <BattleOverlay report={activeReport} onClose={() => setActiveReport(null)} />}
     </div>
   );
 }

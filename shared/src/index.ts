@@ -1,3 +1,5 @@
+import type { CombatResult } from './combat.js';
+
 /** 后端健康检查响应 */
 export interface HealthResponse {
   status: 'ok';
@@ -200,5 +202,51 @@ export interface WorldConfig {
   wildlands: number;
 }
 
+/** 战报：一场打野战斗的结算结果，写入右卡片栏战报卡 */
+export interface BattleReport {
+  id: string;
+  generalId: string;
+  generalName: string;
+  wildlandName: string;
+  victory: boolean;
+  attackerCasualties: number;
+  defenderCasualties: number;
+  droppedRare: number;
+  /** 战斗结算完整日志（前端播放展示用） */
+  log: CombatResult;
+  createdAt: string;
+}
+
+/** 战报列表响应 */
+export interface BattleReportsResponse {
+  reports: BattleReport[];
+}
+
 export { TROOP_CATALOG, getTroopType } from './troops.js';
 export type { TroopType } from './troops.js';
+
+export {
+  GENERAL_BONUS_PER_LEVEL,
+  WEAPON_BONUS_PER_TIER,
+  WIN_PROB_SLOPE,
+  WINNER_CASUALTY_RATE,
+  LOSER_CASUALTY_RATE,
+  BATTLE_ROUNDS,
+  SKILL_POWER_BOOST,
+  WILDLAND_REFRESH_MS,
+  mulberry32,
+  generalMultiplier,
+  weaponBonus,
+  armyPower,
+  generalSidePower,
+  winProbability,
+  resolveCombat,
+  wildlandDrop,
+} from './combat.js';
+export type {
+  CombatUnit,
+  CombatSideInput,
+  CombatantStats,
+  CombatRound,
+  CombatResult,
+} from './combat.js';

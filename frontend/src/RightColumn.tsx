@@ -1,12 +1,15 @@
-import type { UserProfile, WorldStateResponse } from '@mygame/shared';
+import type { BattleReport, UserProfile, WorldStateResponse } from '@mygame/shared';
 
 interface RightColumnProps {
   user: UserProfile;
   world: WorldStateResponse;
+  reports: BattleReport[];
+  /** 点击某条战报时打开战斗回放 */
+  onOpenReport(report: BattleReport): void;
 }
 
 /** 右卡片栏：资源卡 + 战报卡 + 任务卡 + 军团卡 */
-export function RightColumn({ user, world }: RightColumnProps) {
+export function RightColumn({ user, world, reports, onOpenReport }: RightColumnProps) {
   const myCities = world.cities.filter((c) => c.side === 'me').length;
   const { resources } = user;
   return (
@@ -21,7 +24,24 @@ export function RightColumn({ user, world }: RightColumnProps) {
 
       <section className="card">
         <h4>📜 战报</h4>
-        <div className="trow"><span>暂无战报（战斗在任务 6 开放）</span></div>
+        {reports.length === 0 ? (
+          <div className="trow"><span>暂无战报（攻打野地后生成）</span></div>
+        ) : (
+          reports.map((r) => (
+            <button
+              key={r.id}
+              type="button"
+              className={`report-row ${r.victory ? 'ok' : 'bad'}`}
+              onClick={() => onOpenReport(r)}
+              title={`点击回放「${r.wildlandName}」战斗`}
+            >
+              <span>{r.victory ? '🏆' : '💀'} {r.wildlandName}</span>
+              <span className="n">
+                {r.victory && r.droppedRare > 0 ? `+${r.droppedRare}稀有` : '失败'}
+              </span>
+            </button>
+          ))
+        )}
       </section>
 
       <section className="card">

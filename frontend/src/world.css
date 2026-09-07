@@ -498,3 +498,167 @@
   opacity: 0.35;
   cursor: not-allowed;
 }
+
+/* ============ 战报卡 ============ */
+.vc .report-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  background: #fffaf0;
+  border: 1px solid #e4d8bc;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  margin-bottom: 6px;
+}
+
+.vc .report-row:hover {
+  background: #faf3e0;
+}
+
+.vc .report-row.ok .n {
+  color: #3c6e3c;
+  font-weight: 700;
+}
+
+.vc .report-row.bad .n {
+  color: #b02e2e;
+  font-weight: 700;
+}
+
+/* ============ 战斗实例弹窗 ============ */
+.vc .battle-modal {
+  min-width: 520px;
+}
+
+.vc .battle-banner {
+  text-align: center;
+  font-size: 18px;
+  font-weight: 800;
+  padding: 8px;
+  border-radius: 8px;
+  margin-bottom: 10px;
+}
+
+.vc .battle-banner.win {
+  background: #eef5e8;
+  color: #3c6e3c;
+  border: 1px solid #cfe0b8;
+}
+
+.vc .battle-banner.lose {
+  background: #ffecec;
+  color: #b02e2e;
+  border: 1px solid #f2c2c2;
+}
+
+.vc .battle-banner .drop {
+  margin-left: 10px;
+  font-size: 13px;
+}
+
+.vc .battle-formation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.vc .battle-formation .side {
+  flex: 1;
+  background: #f7f0e1;
+  border: 1px solid #e4d8bc;
+  border-radius: 10px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.vc .battle-formation .side.enemy {
+  text-align: right;
+}
+
+.vc .battle-formation .side b {
+  color: #7a4e14;
+  font-size: 13px;
+}
+
+.vc .battle-formation .vs {
+  font-weight: 800;
+  color: #b02e2e;
+}
+
+.vc .battle-play {
+  background: #2a241a;
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.vc .battle-roundline {
+  position: relative;
+  height: 18px;
+  background: #0f0c07;
+  border-radius: 99px;
+  overflow: hidden;
+  display: flex;
+  gap: 2px;
+}
+
+.vc .battle-roundline .pbar-a {
+  height: 100%;
+  background: #1fa7c8;
+  transition: width 0.2s;
+}
+
+.vc .battle-roundline .pbar-d {
+  height: 100%;
+  background: #d04040;
+  transition: width 0.2s;
+}
+
+.vc .battle-rounds {
+  display: flex;
+  justify-content: space-between;
+  color: #ffe9c2;
+  font-size: 12px;
+  padding: 6px 2px;
+}
+
+.vc .battle-rounds b {
+  color: #f0b429;
+}
+
+.vc .battle-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.vc .battle-controls .act {
+  padding: 5px 12px;
+  font-size: 12px;
+}
+
+.vc .battle-skill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+.vc .battle-skill .hint {
+  color: #9c8b6c;
+  font-size: 11px;
+}
+
+.vc .battle-report {
+  border-top: 1px dashed #ece2cc;
+  padding-top: 6px;
+}

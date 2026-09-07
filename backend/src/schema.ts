@@ -110,6 +110,36 @@ const CREATE_TABLES: readonly string[] = [
      cancelled_at TIMESTAMPTZ,
      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
    )`,
+  `CREATE TABLE IF NOT EXISTS battle_instances (
+     id TEXT PRIMARY KEY,
+     world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+     attacker_general_id TEXT NOT NULL REFERENCES generals(id) ON DELETE CASCADE,
+     attacker_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     defender_wildland_id TEXT NOT NULL REFERENCES wildlands(id) ON DELETE CASCADE,
+     attacker_power INTEGER NOT NULL,
+     defender_power INTEGER NOT NULL,
+     winner TEXT NOT NULL CHECK (winner IN ('attacker','defender')),
+     attacker_casualties INTEGER NOT NULL,
+     defender_casualties INTEGER NOT NULL,
+     dropped_rare INTEGER NOT NULL DEFAULT 0,
+     skill_used BOOLEAN NOT NULL DEFAULT false,
+     log JSONB NOT NULL,
+     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+   )`,
+  `CREATE TABLE IF NOT EXISTS battle_reports (
+     id TEXT PRIMARY KEY,
+     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     general_id TEXT NOT NULL REFERENCES generals(id) ON DELETE CASCADE,
+     battle_instance_id TEXT NOT NULL REFERENCES battle_instances(id) ON DELETE CASCADE,
+     wildland_id TEXT NOT NULL REFERENCES wildlands(id) ON DELETE CASCADE,
+     wildland_name TEXT NOT NULL,
+     victory BOOLEAN NOT NULL,
+     attacker_casualties INTEGER NOT NULL,
+     defender_casualties INTEGER NOT NULL,
+     dropped_rare INTEGER NOT NULL DEFAULT 0,
+     log JSONB NOT NULL,
+     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+   )`,
 ];
 
 /** 幂等建表：连接池存在时在首次使用时执行，之后跳过 */
@@ -130,6 +160,8 @@ export async function ensureSchema(db: Db): Promise<void> {
       await ensureArmyUnitsConstraint(client);
       // 旧库补齐 marches 部分唯一索引（并发防重复行军的最后防线）
       await ensureMarchActiveUnique(client);
+      // 旧库补齐野地掉落与刷新字段（CREATE TABLE IF NOT EXISTS 不会给已存在表加列）
+      await ensureWildlandRefreshColumns(client);
     } finally {
       await client.query('SELECT pg_advisory_unlock(7263)');
     }
@@ -214,4 +246,14 @@ export async function ensureMarchActiveUnique(client: PoolClient): Promise<void>
        ON marches (general_id)
       WHERE status = 'active'`,
   );
+}
+
+/** 幂等补齐野地的稀有材料掉落量与刷新字段：
+ * 旧库由早期 schema 创建时缺这两列，会让打野遭遇写入与刷新失败。
+ * ADD COLUMN IF NOT EXISTS 天然幂等，直接执行即可。 */
+export async function ensureWildlandRefreshColumns(client: PoolClient): Promise<void> {
+  await client.query('ALTER TABLE wildlands ADD COLUMN IF NOT EXISTS drop INTEGER NOT NULL DEFAULT 0');
+  await client.query('ALTER TABLE wildlands ADD COLUMN IF NOT EXISTS defeated_at TIMESTAMPTZ');
+  // 旧库已存在的野地没有掉落值，按强度补算
+  await client.query(`UPDATE wildlands SET drop = GREATEST(1, round(strength / 10.0)) WHERE drop = 0`);
 }

@@ -3,7 +3,9 @@ import type { Db } from './db.js';
 import { ensureSchema } from './schema.js';
 import { HttpError } from './http.js';
 import { getActionPoints } from './actionPoints.js';
+import { mulberry32 } from '@mygame/shared';
 import { finalizeArrivedMarches, findActiveMarch, marchPositionAt } from './march.js';
+import { refreshWildlands } from './battle.js';
 import type {
   Side,
   Terrain,
@@ -36,18 +38,6 @@ export class WorldError extends HttpError {
     super(status, message);
     this.name = 'WorldError';
   }
-}
-
-/** 可复现的伪随机数发生器（种子决定世界地形，保证持久一致） */
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
 }
 
 /** 从随机中心长成一块带抖动边界的有机地形团 */
@@ -254,7 +244,8 @@ export async function fetchWorldState(db: Db, token: string): Promise<WorldState
   const genRes = await db.query('SELECT world_id FROM generals WHERE user_id = $1 LIMIT 1', [userId]);
   const worldId = (genRes.rows[0]?.world_id as string | undefined) ?? (await ensureDefaultWorld(db));
 
-  // 到达后状态落库：先结算该世界已到期的行军（离线行军到点后自动到位）
+  // 野地刷新 + 到达后状态落库：先结算该世界已到期的行军（离线行军到点后自动到位）
+  await refreshWildlands(db, worldId);
   await finalizeArrivedMarches(db, worldId);
 
   const worldRes = await db.query('SELECT id, name, width, height FROM worlds WHERE id = $1', [worldId]);
@@ -285,8 +276,9 @@ export async function fetchWorldState(db: Db, token: string): Promise<WorldState
     side: (r.owner_user_id === userId ? 'me' : 'enemy') as Side,
   }));
 
+  // 仅展示存活野地：被攻破的野地刷新前在地图上消失（refreshWildlands 已先行恢复过期野地）
   const wildRes = await db.query(
-    'SELECT id, name, x, y, strength FROM wildlands WHERE world_id = $1 ORDER BY created_at',
+    'SELECT id, name, x, y, strength FROM wildlands WHERE world_id = $1 AND defeated_at IS NULL ORDER BY created_at',
     [worldId],
   );
   const wildlands: WorldWildland[] = wildRes.rows.map((r) => ({

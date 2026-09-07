@@ -1,5 +1,6 @@
 import type {
   AuthResponse,
+  BattleReportsResponse,
   LoginRequest,
   MarchRequest,
   MarchResponse,
@@ -92,4 +93,9 @@ export function apiCancelMarch(token: string, marchId: string): Promise<MarchRes
     body: JSON.stringify({ marchId }),
     headers: { Authorization: `Bearer ${token}` },
   });
+}
+
+/** 拉取当前用户最近的战报列表（战报卡展示） */
+export function apiBattleReports(token: string): Promise<BattleReportsResponse> {
+  return request<BattleReportsResponse>('/api/battle/reports', { headers: { Authorization: `Bearer ${token}` } });
 }

@@ -3,6 +3,7 @@ import type { Db } from './db.js';
 import { ensureSchema } from './schema.js';
 import { HttpError } from './http.js';
 import { getActionPoints, trySpendActionPoints } from './actionPoints.js';
+import { resolveArrivalBattle } from './battle.js';
 import {
   ACTION_COSTS,
   MARCH_TILE_MS,
@@ -285,7 +286,7 @@ export async function finalizeArrivedMarches(db: Db, worldId: string | null): Pr
     params.push(worldId);
   }
   const res = await db.query(
-    `SELECT id, general_id, target_x, target_y FROM marches ${where}`,
+    `SELECT id, world_id, general_id, user_id, target_x, target_y FROM marches ${where}`,
     params,
   );
   if (res.rows.length === 0) {
@@ -294,7 +295,26 @@ export async function finalizeArrivedMarches(db: Db, worldId: string | null): Pr
   const client = await db.connect();
   try {
     await client.query('BEGIN');
-    for (const row of res.rows as Array<{ id: string; general_id: string; target_x: number; target_y: number }>) {
+    for (const row of res.rows as Array<{
+      id: string;
+      world_id: string;
+      general_id: string;
+      user_id: string;
+      target_x: number;
+      target_y: number;
+    }>) {
+      // 目标格是存活野地 → 触发打野战斗实例（含落位/行军状态由战斗结算统一处理）
+      const battled = await resolveArrivalBattle(client, {
+        marchId: row.id,
+        worldId: row.world_id,
+        generalId: row.general_id,
+        userId: row.user_id,
+        targetX: row.target_x,
+        targetY: row.target_y,
+      });
+      if (battled) {
+        continue;
+      }
       await client.query('UPDATE generals SET x = $1, y = $2 WHERE id = $3', [
         row.target_x,
         row.target_y,

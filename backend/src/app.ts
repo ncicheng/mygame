@@ -6,6 +6,7 @@ import { createAuthRouter } from './routes/auth.js';
 import { createMarchRouter } from './routes/march.js';
 import { createRecruitRouter } from './routes/recruit.js';
 import { createWorldRouter } from './routes/world.js';
+import { createBattleRouter } from './routes/battle.js';
 import type { HealthResponse } from '@mygame/shared';
 
 export interface AppOptions {
@@ -23,6 +24,7 @@ export function createApp({ db }: AppOptions): express.Express {
   app.use('/api/recruit', createRecruitRouter(db));
   app.use('/api/world', createWorldRouter(db));
   app.use('/api/march', createMarchRouter(db));
+  app.use('/api/battle', createBattleRouter(db));
 
   app.get('/api/health', async (_req, res) => {
     const dbConnected = await checkDb(db);
