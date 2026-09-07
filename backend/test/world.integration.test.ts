@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { createDb } from '../src/db.js';
 import { createApp } from '../src/app.js';
 import { AP_MAX, ACTION_COSTS, type WorldStateResponse } from '@mygame/shared';
-import { trySpendActionPoints } from '../src/world.js';
+import { trySpendActionPoints } from '../src/actionPoints.js';
 
 // 集成测试：必须连真实本地 Postgres 才算通过（run-integration.mjs 用 embedded-postgres 提供）
 const databaseUrl = process.env.DATABASE_URL;

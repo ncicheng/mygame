@@ -1,6 +1,8 @@
 import type {
   AuthResponse,
   LoginRequest,
+  MarchRequest,
+  MarchResponse,
   MeResponse,
   RecruitRequest,
   RecruitResponse,
@@ -70,6 +72,24 @@ export function apiRecruit(token: string, req: RecruitRequest): Promise<RecruitR
   return request<RecruitResponse>('/api/recruit', {
     method: 'POST',
     body: JSON.stringify(req),
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+/** 发布行军命令：消耗行动点，为部队下达行军到目标格 */
+export function apiMarch(token: string, req: MarchRequest): Promise<MarchResponse> {
+  return request<MarchResponse>('/api/march', {
+    method: 'POST',
+    body: JSON.stringify(req),
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+/** 取消行军：部队返回起点 */
+export function apiCancelMarch(token: string, marchId: string): Promise<MarchResponse> {
+  return request<MarchResponse>('/api/march/cancel', {
+    method: 'POST',
+    body: JSON.stringify({ marchId }),
     headers: { Authorization: `Bearer ${token}` },
   });
 }

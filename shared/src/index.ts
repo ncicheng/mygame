@@ -114,6 +114,24 @@ export interface WorldArmy {
   y: number;
   side: Side;
   troopCount: number;
+  /** 进行中的行军；无行军时为 null */
+  march: WorldMarch | null;
+}
+
+/** 行军状态：行进中 / 已到达 / 已取消 */
+export type MarchStatus = 'active' | 'arrived' | 'cancelled';
+
+/** 行军命令：部队从起点行军到目标格，按服务器时钟插值位置 */
+export interface WorldMarch {
+  id: string;
+  generalId: string;
+  originX: number;
+  originY: number;
+  targetX: number;
+  targetY: number;
+  departedAt: string;
+  arrivesAt: string;
+  status: MarchStatus;
 }
 
 /** 行动点：当前/上限 + 恢复信息 */
@@ -142,6 +160,22 @@ export const AP_RECOVER_MS = 10 * 60 * 1000;
 
 /** 行动点消耗规则（出征/招募/打野/攻城），招募 Task 4 起使用 */
 export const ACTION_COSTS = { march: 1, recruit: 1, bandit: 2, siege: 3 } as const;
+
+/** 行军速度：每走过一格耗时（毫秒）。20×14 小地图下 1.5s/格，数秒可达相邻目标 */
+export const MARCH_TILE_MS = 1500;
+
+/** 行军请求：为指定部队（武将）下达行军命令到目标格 */
+export interface MarchRequest {
+  generalId: string;
+  targetX: number;
+  targetY: number;
+}
+
+/** 行军响应：创建的行军命令与最新行动点 */
+export interface MarchResponse {
+  march: WorldMarch;
+  actionPoints: ActionPoints;
+}
 
 /** 招募请求：为指定武将招募指定等级的兵，数量为正整数 */
 export interface RecruitRequest {

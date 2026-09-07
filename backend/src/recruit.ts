@@ -3,7 +3,7 @@ import type { Db } from './db.js';
 import { ensureSchema } from './schema.js';
 import { HttpError } from './http.js';
 import { fetchProfile } from './auth.js';
-import { getActionPoints, trySpendActionPoints } from './world.js';
+import { getActionPoints, trySpendActionPoints } from './actionPoints.js';
 import { ACTION_COSTS, getTroopType, type ActionPoints, type UserProfile } from '@mygame/shared';
 
 /** 招募服务错误：携带 HTTP 状态码与可读信息 */

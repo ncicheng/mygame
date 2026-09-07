@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto';
 import type { Db } from './db.js';
 import { ensureSchema } from './schema.js';
 import { HttpError } from './http.js';
-import { AP_MAX, AP_RECOVER_MS } from '@mygame/shared';
+import { getActionPoints } from './actionPoints.js';
+import { finalizeArrivedMarches, findActiveMarch, marchPositionAt } from './march.js';
 import type {
-  ActionPoints,
   Side,
   Terrain,
   WorldArmy,
@@ -114,29 +114,6 @@ export function findStartTile(
     }
   }
   return null;
-}
-
-/** 行动点计算的中间结果 */
-export interface ApComputation {
-  current: number;
-  lastRecoveredAt: Date;
-  nextRecoveryAt: Date | null;
-}
-
-/** 计算行动点：每满一个恢复周期补 1 点，最多封顶到上限 */
-export function computeActionPoints(
-  current: number,
-  max: number,
-  lastRecoveredAt: Date,
-  now: Date,
-  recoverMs: number,
-): ApComputation {
-  const elapsed = now.getTime() - lastRecoveredAt.getTime();
-  const periods = Math.max(0, Math.floor(elapsed / recoverMs));
-  const newCurrent = Math.min(max, current + periods);
-  const newLast = periods > 0 ? new Date(lastRecoveredAt.getTime() + periods * recoverMs) : lastRecoveredAt;
-  const nextRecoveryAt = newCurrent >= max ? null : new Date(newLast.getTime() + recoverMs);
-  return { current: newCurrent, lastRecoveredAt: newLast, nextRecoveryAt };
 }
 
 /** 确保默认世界存在：不存在则生成地形并预置敌方城池与野地，返回世界 id */
@@ -260,66 +237,6 @@ export async function findPlayerStartTile(db: Db, worldId: string): Promise<{ x:
   return tile;
 }
 
-/** 读取并推进玩家行动点（按恢复周期补点），返回给前端展示的结构 */
-export async function getActionPoints(db: Db, userId: string): Promise<ActionPoints> {
-  if (!db) {
-    throw new WorldError(503, '服务暂不可用（未连接数据库）');
-  }
-  const res = await db.query('SELECT current, max, last_recovered_at FROM action_points WHERE user_id = $1', [userId]);
-  if (res.rows.length === 0) {
-    return { current: AP_MAX, max: AP_MAX, recoverMs: AP_RECOVER_MS, nextRecoveryAt: null };
-  }
-  const row = res.rows[0];
-  const computed = computeActionPoints(
-    row.current as number,
-    row.max as number,
-    new Date(row.last_recovered_at as string),
-    new Date(),
-    AP_RECOVER_MS,
-  );
-  if (computed.lastRecoveredAt.getTime() !== new Date(row.last_recovered_at as string).getTime()) {
-    await db.query('UPDATE action_points SET current = $1, last_recovered_at = $2 WHERE user_id = $3', [
-      computed.current,
-      computed.lastRecoveredAt,
-      userId,
-    ]);
-  }
-  return {
-    current: computed.current,
-    max: row.max as number,
-    recoverMs: AP_RECOVER_MS,
-    nextRecoveryAt: computed.nextRecoveryAt ? computed.nextRecoveryAt.toISOString() : null,
-  };
-}
-
-/** 行动点消耗：足额则扣减并返回 true，不足返回 false（Task 4+ 调用） */
-export async function trySpendActionPoints(db: Db, userId: string, cost: number): Promise<boolean> {
-  if (!db) {
-    throw new WorldError(503, '服务暂不可用（未连接数据库）');
-  }
-  const res = await db.query('SELECT current, max, last_recovered_at FROM action_points WHERE user_id = $1', [userId]);
-  if (res.rows.length === 0) {
-    return false;
-  }
-  const row = res.rows[0];
-  const computed = computeActionPoints(
-    row.current as number,
-    row.max as number,
-    new Date(row.last_recovered_at as string),
-    new Date(),
-    AP_RECOVER_MS,
-  );
-  if (computed.current < cost) {
-    return false;
-  }
-  await db.query('UPDATE action_points SET current = $1, last_recovered_at = $2 WHERE user_id = $3', [
-    computed.current - cost,
-    computed.lastRecoveredAt,
-    userId,
-  ]);
-  return true;
-}
-
 /** 组装登录用户视角的世界状态 */
 export async function fetchWorldState(db: Db, token: string): Promise<WorldStateResponse> {
   await ensureSchema(db);
@@ -336,6 +253,9 @@ export async function fetchWorldState(db: Db, token: string): Promise<WorldState
   // 玩家所在世界 = 其武将所在世界；没有武将时兜底到默认世界
   const genRes = await db.query('SELECT world_id FROM generals WHERE user_id = $1 LIMIT 1', [userId]);
   const worldId = (genRes.rows[0]?.world_id as string | undefined) ?? (await ensureDefaultWorld(db));
+
+  // 到达后状态落库：先结算该世界已到期的行军（离线行军到点后自动到位）
+  await finalizeArrivedMarches(db, worldId);
 
   const worldRes = await db.query('SELECT id, name, width, height FROM worlds WHERE id = $1', [worldId]);
   if (worldRes.rows.length === 0) {
@@ -386,14 +306,37 @@ export async function fetchWorldState(db: Db, token: string): Promise<WorldState
       ORDER BY g.created_at`,
     [worldId],
   );
-  const armies: WorldArmy[] = armyRes.rows.map((r) => ({
-    id: r.id as string,
-    generalName: r.name as string,
-    x: r.x as number,
-    y: r.y as number,
-    side: (r.user_id === userId ? 'me' : 'enemy') as Side,
-    troopCount: Number(r.troop_count),
-  }));
+  const armies: WorldArmy[] = [];
+  for (const r of armyRes.rows as Array<Record<string, unknown>>) {
+    const march = await findActiveMarch(db, r.id as string);
+    let x = r.x as number;
+    let y = r.y as number;
+    if (march) {
+      // 进行中的行军：位置按服务器时钟插值（离线行军期间位置也持续推进）
+      const pos = marchPositionAt(
+        {
+          originX: march.originX,
+          originY: march.originY,
+          targetX: march.targetX,
+          targetY: march.targetY,
+          departedAt: new Date(march.departedAt),
+          arrivesAt: new Date(march.arrivesAt),
+        },
+        Date.now(),
+      );
+      x = pos.x;
+      y = pos.y;
+    }
+    armies.push({
+      id: r.id as string,
+      generalName: r.name as string,
+      x,
+      y,
+      side: (r.user_id === userId ? 'me' : 'enemy') as Side,
+      troopCount: Number(r.troop_count),
+      march,
+    });
+  }
 
   const actionPoints = await getActionPoints(db, userId);
 

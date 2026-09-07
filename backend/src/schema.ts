@@ -91,6 +91,21 @@ const CREATE_TABLES: readonly string[] = [
      current INTEGER NOT NULL,
      max INTEGER NOT NULL,
      last_recovered_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`,
+  `CREATE TABLE IF NOT EXISTS marches (
+     id TEXT PRIMARY KEY,
+     world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+     general_id TEXT NOT NULL REFERENCES generals(id) ON DELETE CASCADE,
+     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     origin_x INTEGER NOT NULL,
+     origin_y INTEGER NOT NULL,
+     target_x INTEGER NOT NULL,
+     target_y INTEGER NOT NULL,
+     departed_at TIMESTAMPTZ NOT NULL,
+     arrives_at TIMESTAMPTZ NOT NULL,
+     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','arrived','cancelled')),
+     cancelled_at TIMESTAMPTZ,
+     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
    )`,
 ];
 

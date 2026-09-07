@@ -12,6 +12,12 @@ export default defineConfig({
         target: process.env.BACKEND_URL ?? 'http://localhost:3001',
         changeOrigin: true,
       },
+      // Socket.IO 实时推送（行军位置）也代理到本地后端，并开启 websocket
+      '/socket.io': {
+        target: process.env.BACKEND_URL ?? 'http://localhost:3001',
+        ws: true,
+        changeOrigin: true,
+      },
     },
   },
 });

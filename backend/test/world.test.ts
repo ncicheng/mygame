@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { AP_MAX, ACTION_COSTS, type WorldConfig } from '@mygame/shared';
-import { WORLD_CONFIG, computeActionPoints, findStartTile, generateTerrain } from '../src/world.js';
+import { WORLD_CONFIG, findStartTile, generateTerrain } from '../src/world.js';
+import { computeActionPoints } from '../src/actionPoints.js';
 
 // 单元测试：不依赖数据库，仅验证世界地形生成、落位与行动点恢复的纯逻辑
 const config: WorldConfig = { ...WORLD_CONFIG, width: 8, height: 6 };
