@@ -186,8 +186,31 @@ export async function ensureArmyUnitsConstraint(client: PoolClient): Promise<voi
  * 检查后仍可能插入两条 active 行军的最后防线（唯一索引兜底）。
  */
 export async function ensureMarchActiveUnique(client: PoolClient): Promise<void> {
+  // 已存在则跳过，幂等（避免每次启动都重跑去重）
+  const has = await client.query(
+    `SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = $1`,
+    [MARCH_ACTIVE_UNIQUE],
+  );
+  if (has.rowCount) {
+    return;
+  }
+  // 旧库可能因此前「并发双重行军无唯一性兜底」的 bug，遗留同一武将多条 active 行军。
+  // 直接建部分唯一索引会抛 23505 并让 ensureSchema 启动失败，故先按确定规则去重：
+  // 每名武将保留「出发最早的一条 active」（departed_at 相同则以 id 最小者），其余置为 cancelled。
   await client.query(
-    `CREATE UNIQUE INDEX IF NOT EXISTS ${MARCH_ACTIVE_UNIQUE}
+    `UPDATE marches m
+     SET status = 'cancelled', cancelled_at = now()
+     WHERE m.status = 'active'
+       AND m.id NOT IN (
+         SELECT DISTINCT ON (general_id) id
+         FROM marches
+         WHERE status = 'active'
+         ORDER BY general_id, departed_at, id
+       )`,
+  );
+  // 补部分唯一索引（索引名为固定常量，非用户输入，可直接拼接）
+  await client.query(
+    `CREATE UNIQUE INDEX ${MARCH_ACTIVE_UNIQUE}
        ON marches (general_id)
       WHERE status = 'active'`,
   );
