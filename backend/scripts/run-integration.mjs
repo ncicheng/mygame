@@ -45,7 +45,7 @@ console.log(`[integration] DATABASE_URL=${env.DATABASE_URL}`);
 
 const child = spawn(
   process.execPath,
-  ['--import', 'tsx', '--test', 'test/db.integration.test.ts', 'test/auth.integration.test.ts', 'test/world.integration.test.ts', 'test/recruit.integration.test.ts', 'test/march.integration.test.ts', 'test/schema.integration.test.ts'],
+  ['--import', 'tsx', '--test', 'test/db.integration.test.ts', 'test/auth.integration.test.ts', 'test/world.integration.test.ts', 'test/recruit.integration.test.ts', 'test/march.integration.test.ts', 'test/socket.integration.test.ts', 'test/schema.integration.test.ts'],
   { cwd: backendRoot, env, stdio: 'inherit' },
 );
 

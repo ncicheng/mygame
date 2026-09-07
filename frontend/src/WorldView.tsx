@@ -34,6 +34,7 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
   const [marchArmyId, setMarchArmyId] = useState<string | null>(null);
   const [marchMsg, setMarchMsg] = useState<string | null>(null);
   const [marchErr, setMarchErr] = useState<string | null>(null);
+  const [marching, setMarching] = useState(false);
 
   // 首次加载世界
   useEffect(() => {
@@ -58,8 +59,9 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
     };
   }, [token]);
 
-  // 实时渲染：订阅服务器世界时钟推送的行军位置，逐格移动
-  const socket = useMemo(() => io(), []);
+  // 实时渲染：订阅服务器世界时钟推送的行军位置，逐格移动。
+  // 连接时携带 token，服务端据此把 socket 归入其所在世界的房间（只收本世界推送）。
+  const socket = useMemo(() => io({ auth: { token } }), [token]);
   useEffect(() => {
     socket.on('march:update', (updates: MarchUpdate[]) => {
       setWorld((w) => {
@@ -99,10 +101,11 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
 
   const issueMarch = useCallback(
     async (target: MapCell) => {
-      if (!marchArmyId) {
+      if (!marchArmyId || marching) {
         return;
       }
       const generalId = marchArmyId;
+      setMarching(true);
       try {
         const res = await apiMarch(token, { generalId, targetX: target.x, targetY: target.y });
         setWorld((w) => {
@@ -121,9 +124,11 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
         setMarchErr(null);
       } catch (err: unknown) {
         setMarchErr(err instanceof Error ? err.message : String(err));
+      } finally {
+        setMarching(false);
       }
     },
-    [marchArmyId, token],
+    [marchArmyId, token, marching],
   );
 
   const handleCellClick = useCallback(

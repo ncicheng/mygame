@@ -20,6 +20,11 @@ export class MarchError extends HttpError {
   }
 }
 
+/** 是否为 Postgres 唯一约束冲突（SQLSTATE 23505） */
+function isUniqueViolation(err: unknown): boolean {
+  return (err as { code?: string } | null)?.code === '23505';
+}
+
 /** 行军插值的行程：起点/目标 + 出发/到达时间（纯数据，供纯函数使用） */
 export interface MarchSchedule {
   originX: number;
@@ -165,32 +170,55 @@ export async function createMarch(db: Db, token: string, body: unknown): Promise
     throw new MarchError(400, '该部队正在行军中');
   }
 
-  const spent = await trySpendActionPoints(db, userId, ACTION_COSTS.march);
-  if (!spent) {
-    throw new MarchError(400, '行动点不足');
-  }
-
   const now = new Date();
   const distance = manhattanDistance({ x: general.x, y: general.y }, { x: targetX, y: targetY });
   const arrivesAt = computeArrivalAt(now.getTime(), distance);
   const marchId = randomUUID();
 
-  await db.query(
-    `INSERT INTO marches (id, world_id, general_id, user_id, origin_x, origin_y, target_x, target_y, departed_at, arrives_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-    [
-      marchId,
-      worldId,
-      generalId,
-      userId,
-      general.x,
-      general.y,
-      targetX,
-      targetY,
-      now,
-      arrivesAt,
-    ],
-  );
+  // 扣行动点 + 写行军记录放在同一个事务里：任一步失败整体回滚，
+  // 避免「扣了行动点但行军未建成」或「扣点与插入脱节」的不一致。
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const spent = await trySpendActionPoints(client, userId, ACTION_COSTS.march);
+    if (!spent) {
+      throw new MarchError(400, '行动点不足');
+    }
+
+    try {
+      await client.query(
+        `INSERT INTO marches (id, world_id, general_id, user_id, origin_x, origin_y, target_x, target_y, departed_at, arrives_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          marchId,
+          worldId,
+          generalId,
+          userId,
+          general.x,
+          general.y,
+          targetX,
+          targetY,
+          now,
+          arrivesAt,
+        ],
+      );
+    } catch (err) {
+      // 并发下两道请求同时通过 findActiveMarch 检查时，由部分唯一索引兜底：
+      // 第二次插入触发唯一约束冲突，判定为「该部队正在行军中」。
+      if (isUniqueViolation(err)) {
+        throw new MarchError(400, '该部队正在行军中');
+      }
+      throw err;
+    }
+
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
 
   const march: WorldMarch = {
     id: marchId,

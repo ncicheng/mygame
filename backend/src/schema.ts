@@ -7,6 +7,9 @@ const ensured = new WeakSet<object>();
 /** army_units 同兵种唯一约束名，与 CREATE TABLE 的自动命名保持一致 */
 const ARMY_UNITS_UNIQUE_KEY = 'army_units_general_id_soldier_level_key';
 
+/** marches 上「同一武将同时只允许一条 active 行军」的部分唯一索引名 */
+const MARCH_ACTIVE_UNIQUE = 'marches_general_id_active_unique';
+
 const CREATE_TABLES: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS users (
      id TEXT PRIMARY KEY,
@@ -125,6 +128,8 @@ export async function ensureSchema(db: Db): Promise<void> {
       }
       // 旧库补齐 army_units 唯一约束（CREATE TABLE IF NOT EXISTS 不会给已存在表加约束）
       await ensureArmyUnitsConstraint(client);
+      // 旧库补齐 marches 部分唯一索引（并发防重复行军的最后防线）
+      await ensureMarchActiveUnique(client);
     } finally {
       await client.query('SELECT pg_advisory_unlock(7263)');
     }
@@ -173,5 +178,17 @@ export async function ensureArmyUnitsConstraint(client: PoolClient): Promise<voi
   await client.query(
     `ALTER TABLE army_units
      ADD CONSTRAINT ${ARMY_UNITS_UNIQUE_KEY} UNIQUE (general_id, soldier_level)`,
+  );
+}
+
+/** 幂等补齐 marches 的部分唯一索引：同一武将同时只能有一条 active 行军。
+ * 应用层 findActiveMarch 先检查是快速路径；此索引是并发下两道请求同时通过
+ * 检查后仍可能插入两条 active 行军的最后防线（唯一索引兜底）。
+ */
+export async function ensureMarchActiveUnique(client: PoolClient): Promise<void> {
+  await client.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS ${MARCH_ACTIVE_UNIQUE}
+       ON marches (general_id)
+      WHERE status = 'active'`,
   );
 }

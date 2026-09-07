@@ -194,6 +194,55 @@ test('到达后状态落库：行军到点后部队停到目标格', { skip }, a
   assert.equal(arrived.march, null, '到达后不再有进行中的行军');
 });
 
+test('唯一索引：同一武将不能同时存在两条 active 行军（防并发重复）', { skip }, async () => {
+  const reg = await register(uniqueUsername(), 'secret123');
+  const token = reg.body.token as string;
+  const user = reg.body.user as UserProfile;
+  const generalId = user.generals[0].id;
+
+  const ws = (await getWorld(token)).body as WorldStateResponse;
+  const myArmy = ws.armies.find((a) => a.side === 'me')!;
+  const target = await pickTarget(token, { x: myArmy.x, y: myArmy.y });
+
+  // 先经 API 建一条 active 行军
+  await postMarch(token, { generalId, targetX: target.x, targetY: target.y });
+
+  // 绕过应用层 findActiveMarch 检查，直接模拟并发插入第二条 active 行军（应被唯一索引拒绝）
+  await assert.rejects(
+    db!.query(
+      `INSERT INTO marches (id, world_id, general_id, user_id, origin_x, origin_y, target_x, target_y, departed_at, arrives_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), now() + interval '10 minutes')`,
+      [randomUUID(), ws.world.id, generalId, user.id, myArmy.x, myArmy.y, target.x, target.y],
+    ),
+    (err) => (err as { code?: string }).code === '23505',
+  );
+});
+
+test('并发双击行军：仅一条成功，行动点只扣减一次', { skip }, async () => {
+  const reg = await register(uniqueUsername(), 'secret123');
+  const token = reg.body.token as string;
+  const user = reg.body.user as UserProfile;
+  const generalId = user.generals[0].id;
+
+  const ws = (await getWorld(token)).body as WorldStateResponse;
+  const myArmy = ws.armies.find((a) => a.side === 'me')!;
+  const target = await pickTarget(token, { x: myArmy.x, y: myArmy.y });
+
+  // 同一部队并发下达多次行军（前端防抖前的双击场景），模拟多个请求同时到达
+  const attempts = await Promise.all(
+    Array.from({ length: 6 }, () =>
+      postMarch(token, { generalId, targetX: target.x, targetY: target.y }),
+    ),
+  );
+  const okCount = attempts.filter((r) => r.status === 200).length;
+  const failCount = attempts.filter((r) => r.status === 400).length;
+  assert.equal(okCount, 1, '并发下只能成功一条行军');
+  assert.equal(failCount, 5, '其余请求应被拒绝');
+
+  const after = (await getWorld(token)).body as WorldStateResponse;
+  assert.equal(after.actionPoints.current, AP_MAX - ACTION_COSTS.march, '行动点只应扣减一次');
+});
+
 test('行军时长 = 距离 × 每格耗时（响应中到达时间正确）', { skip }, async () => {
   const reg = await register(uniqueUsername(), 'secret123');
   const token = reg.body.token as string;

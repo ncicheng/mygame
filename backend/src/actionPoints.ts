@@ -1,6 +1,10 @@
+import type { Pool, PoolClient } from 'pg';
 import type { Db } from './db.js';
 import { HttpError } from './http.js';
 import { AP_MAX, AP_RECOVER_MS, type ActionPoints } from '@mygame/shared';
+
+/** 可执行查询的数据库句柄：连接池或事务内客户端 */
+export type Queryable = Pool | PoolClient;
 
 /** 行动点服务错误：携带 HTTP 状态码与可读信息 */
 export class ActionPointError extends HttpError {
@@ -65,8 +69,9 @@ export async function getActionPoints(db: Db, userId: string): Promise<ActionPoi
   };
 }
 
-/** 行动点消耗：足额则扣减并返回 true，不足返回 false（Task 4+ 调用） */
-export async function trySpendActionPoints(db: Db, userId: string, cost: number): Promise<boolean> {
+/** 行动点消耗：足额则扣减并返回 true，不足返回 false。
+ * 接受连接池或事务内客户端（调用方需自行保证与写入同一事务，避免扣点与写库脱节）。 */
+export async function trySpendActionPoints(db: Queryable | null, userId: string, cost: number): Promise<boolean> {
   if (!db) {
     throw new ActionPointError(503, '服务暂不可用（未连接数据库）');
   }
