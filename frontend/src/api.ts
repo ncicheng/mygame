@@ -2,6 +2,8 @@ import type {
   AuthResponse,
   LoginRequest,
   MeResponse,
+  RecruitRequest,
+  RecruitResponse,
   RegisterRequest,
   UserProfile,
   WorldStateResponse,
@@ -60,5 +62,14 @@ export async function apiLogout(token: string): Promise<void> {
 
 /** 拉取当前登录用户的世界状态（登录用户视角） */
 export async function apiWorld(token: string): Promise<WorldStateResponse> {
-  return request<WorldStateResponse>('/api/world', { headers: { Authorization: `Bearer ${token}` } });
+  return request('/api/world', { headers: { Authorization: `Bearer ${token}` } });
+}
+
+/** 招募：消耗基础资源与行动点，兵加入部队；返回更新后的档案与行动点 */
+export function apiRecruit(token: string, req: RecruitRequest): Promise<RecruitResponse> {
+  return request<RecruitResponse>('/api/recruit', {
+    method: 'POST',
+    body: JSON.stringify(req),
+    headers: { Authorization: `Bearer ${token}` },
+  });
 }

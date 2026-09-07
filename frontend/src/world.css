@@ -338,3 +338,127 @@
   gap: 12px;
   align-items: center;
 }
+
+/* ============ 招募弹窗 ============ */
+.vc .modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(30, 20, 5, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+
+.vc .modal {
+  background: #fffaf0;
+  border: 2px solid #b08a3e;
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(60, 40, 10, 0.35);
+  padding: 16px 18px;
+  min-width: 460px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow: auto;
+}
+
+.vc .modal header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.vc .modal header b {
+  font-size: 15px;
+  color: #7a4e14;
+  letter-spacing: 2px;
+}
+
+.vc .modal header button {
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: #9c8b6c;
+  cursor: pointer;
+}
+
+.vc .recruit-count {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: #6b5f49;
+}
+
+.vc .recruit-count button {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid #d6c8a6;
+  background: #fff;
+  cursor: pointer;
+  font-size: 15px;
+}
+
+.vc .recruit-count span {
+  font-weight: 700;
+  color: #7a4e14;
+  min-width: 24px;
+  text-align: center;
+}
+
+.vc .recruit-msg {
+  background: #eef5e8;
+  border: 1px solid #cfe0b8;
+  color: #3c6e3c;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+.vc .recruit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.vc .recruit-table th {
+  text-align: left;
+  color: #9c8b6c;
+  font-weight: 600;
+  padding: 4px 6px;
+  border-bottom: 2px solid #e4d8bc;
+}
+
+.vc .recruit-table td {
+  padding: 6px;
+  border-bottom: 1px dashed #ece2cc;
+}
+
+.vc .recruit-table tr:hover {
+  background: #faf3e0;
+}
+
+.vc .recruit-table .n {
+  color: #7a4e14;
+  font-weight: 700;
+}
+
+.vc .recruit-table button {
+  background: #7a4e14;
+  color: #ffe9c2;
+  border: none;
+  border-radius: 8px;
+  padding: 4px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.vc .recruit-table button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}

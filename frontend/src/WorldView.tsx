@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { UserProfile, WorldStateResponse } from '@mygame/shared';
+import type { ActionPoints, UserProfile, WorldStateResponse } from '@mygame/shared';
 import { apiWorld } from './api';
 import { ActionDeck } from './ActionDeck';
 import { LeftColumn } from './LeftColumn';
 import { MapBoard, describeCell, type MapCell } from './MapBoard';
+import { RecruitModal } from './RecruitModal';
 import { RightColumn } from './RightColumn';
 import './world.css';
 
@@ -11,13 +12,16 @@ interface WorldViewProps {
   user: UserProfile;
   token: string;
   onLogout(): void;
+  /** 招募等业务更新档案后提升到 App 状态（资源卡/部队编成卡实时刷新） */
+  onUserUpdate(user: UserProfile): void;
 }
 
 /** 登录后主界面：变体 C「运筹帷幄」桌游指挥台布局 */
-export function WorldView({ user, token, onLogout }: WorldViewProps) {
+export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProps) {
   const [world, setWorld] = useState<WorldStateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<MapCell | null>(null);
+  const [recruiting, setRecruiting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -44,6 +48,15 @@ export function WorldView({ user, token, onLogout }: WorldViewProps) {
   const handleCellClick = useCallback((cell: MapCell) => {
     setSelected(cell);
   }, []);
+
+  // 招募成功：档案提升到 App，行动点就地刷新（不重新拉取世界）
+  const handleRecruited = useCallback(
+    (updatedUser: UserProfile, actionPoints: ActionPoints) => {
+      onUserUpdate(updatedUser);
+      setWorld((w) => (w ? { ...w, actionPoints } : w));
+    },
+    [onUserUpdate],
+  );
 
   if (error || !world) {
     return (
@@ -85,8 +98,17 @@ export function WorldView({ user, token, onLogout }: WorldViewProps) {
         </aside>
       </div>
       <footer className="vc-bottom">
-        <ActionDeck ap={world.actionPoints} />
+        <ActionDeck ap={world.actionPoints} onRecruit={() => setRecruiting(true)} />
       </footer>
+      {recruiting && (
+        <RecruitModal
+          user={user}
+          token={token}
+          ap={world.actionPoints.current}
+          onClose={() => setRecruiting(false)}
+          onRecruited={handleRecruited}
+        />
+      )}
     </div>
   );
 }

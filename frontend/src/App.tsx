@@ -71,6 +71,11 @@ function App() {
     setUser(null);
   }, [token]);
 
+  // 招募等业务会改变用户档案（资源/部队），提升到 App 以驱动各卡片实时刷新
+  const handleUserUpdate = useCallback((newUser: UserProfile) => {
+    setUser(newUser);
+  }, []);
+
   return (
     <main style={{ fontFamily: 'system-ui, sans-serif', padding: '2rem', maxWidth: 720 }}>
       <h1>MyGame — 运筹帷幄</h1>
@@ -78,7 +83,7 @@ function App() {
       {token === null && <AuthForm onAuth={handleAuth} />}
       {token !== null && loading && <p>正在读取存档…</p>}
       {token !== null && !loading && user !== null && (
-        <WorldView user={user} token={token} onLogout={handleLogout} />
+        <WorldView user={user} token={token} onLogout={handleLogout} onUserUpdate={handleUserUpdate} />
       )}
     </main>
   );

@@ -55,7 +55,7 @@ interface GeneralRow {
 }
 
 /** 组装用户档案：用户 + 资源 + 武将（含部队与武器） */
-async function fetchProfile(db: Db, userId: string): Promise<UserProfile> {
+export async function fetchProfile(db: Db, userId: string): Promise<UserProfile> {
   await ensureSchema(db);
   if (!db) {
     throw new AuthError(503, '服务暂不可用（未连接数据库）');

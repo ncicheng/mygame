@@ -79,7 +79,8 @@ const CREATE_TABLES: readonly string[] = [
      general_id TEXT NOT NULL REFERENCES generals(id) ON DELETE CASCADE,
      soldier_type TEXT NOT NULL,
      soldier_level INTEGER NOT NULL,
-     count INTEGER NOT NULL
+     count INTEGER NOT NULL,
+     UNIQUE (general_id, soldier_level)
    )`,
   `CREATE TABLE IF NOT EXISTS action_points (
      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,

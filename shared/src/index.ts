@@ -140,8 +140,21 @@ export const AP_MAX = 5;
 /** 行动点恢复周期：每 10 分钟恢复 1 点 */
 export const AP_RECOVER_MS = 10 * 60 * 1000;
 
-/** 行动点消耗规则（出征/打野/攻城），Task 4+ 使用 */
-export const ACTION_COSTS = { march: 1, bandit: 2, siege: 3 } as const;
+/** 行动点消耗规则（出征/招募/打野/攻城），招募 Task 4 起使用 */
+export const ACTION_COSTS = { march: 1, recruit: 1, bandit: 2, siege: 3 } as const;
+
+/** 招募请求：为指定武将招募指定等级的兵，数量为正整数 */
+export interface RecruitRequest {
+  generalId: string;
+  soldierLevel: number;
+  count: number;
+}
+
+/** 招募响应：更新后的用户档案与行动点（部队编成卡/资源卡实时刷新用） */
+export interface RecruitResponse {
+  user: UserProfile;
+  actionPoints: ActionPoints;
+}
 
 /** 世界生成配置 */
 export interface WorldConfig {
@@ -152,3 +165,6 @@ export interface WorldConfig {
   enemyCities: number;
   wildlands: number;
 }
+
+export { TROOP_CATALOG, getTroopType } from './troops.js';
+export type { TroopType } from './troops.js';
