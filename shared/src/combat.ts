@@ -89,6 +89,17 @@ export function weaponBonus(tier: number | null): number {
   return tier ? tier * WEAPON_BONUS_PER_TIER : 0;
 }
 
+/** 兵-武器等级约束：兵只能装备对应阶武器。
+ * 武将可装备任意阶武器（装备不限），但武器加成需由部队中的兵发挥：
+ * 部队最高兵种等级封顶武器的有效阶数，越阶部分不产生加成。
+ * 无兵或无武器时有效阶为 0。 */
+export function effectiveWeaponTier(weaponTier: number | null, maxSoldierLevel: number): number {
+  if (!weaponTier || maxSoldierLevel <= 0) {
+    return 0;
+  }
+  return Math.min(weaponTier, maxSoldierLevel);
+}
+
 /** 部队战力：兵数 × 单兵战力 求和（未知等级兵种按 0 计） */
 export function armyPower(army: CombatUnit[]): number {
   return army.reduce((sum, unit) => {

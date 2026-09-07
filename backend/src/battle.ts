@@ -9,6 +9,7 @@ import {
   LOSER_CASUALTY_RATE,
   WILDLAND_REFRESH_MS,
   WINNER_CASUALTY_RATE,
+  effectiveWeaponTier,
   generalSidePower,
   resolveCombat,
   shouldReleaseSkill,
@@ -120,9 +121,14 @@ export async function resolveArrivalBattle(
     count: r.count,
   }));
 
+  // 兵-武器等级约束：兵只能装备对应阶武器。武将可装备任意阶武器，但武器加成
+  // 需由部队中的兵发挥，故按部队最高兵种等级封顶武器有效阶数。
+  const maxSoldierLevel = army.reduce((max, u) => Math.max(max, u.soldierLevel), 0);
+  const effectiveTier = effectiveWeaponTier(general.weapon_tier, maxSoldierLevel);
+
   const attackerInput: CombatSideInput = {
     generalLevel: general.level,
-    weaponTier: general.weapon_tier,
+    weaponTier: effectiveTier,
     army,
   };
   const attackerPower = generalSidePower(attackerInput);

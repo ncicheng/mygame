@@ -46,6 +46,7 @@ interface GeneralRow {
   id: string;
   name: string;
   level: number;
+  stars: number;
   weapon_id: string | null;
   weapon_name: string | null;
   weapon_tier: number | null;
@@ -78,8 +79,11 @@ export async function fetchProfile(db: Db, userId: string): Promise<UserProfile>
         }
       : { food: 0, iron: 0, rare: 0, gold: 0 };
 
+  const progRes = await db.query('SELECT troop_max_unlocked FROM progression WHERE user_id = $1', [userId]);
+  const troopMaxUnlocked = (progRes.rows[0]?.troop_max_unlocked as number) ?? 3;
+
   const genRes = await db.query(
-    `SELECT g.id, g.name, g.level, g.weapon_id,
+    `SELECT g.id, g.name, g.level, g.stars, g.weapon_id,
             w.name AS weapon_name, w.tier AS weapon_tier,
             a.soldier_type, a.soldier_level, a.count
        FROM generals g
@@ -98,6 +102,7 @@ export async function fetchProfile(db: Db, userId: string): Promise<UserProfile>
         id: row.id,
         name: row.name,
         level: row.level,
+        stars: row.stars ?? 1,
         weapon:
           row.weapon_id && row.weapon_name !== null && row.weapon_tier !== null
             ? { id: row.weapon_id, name: row.weapon_name, tier: row.weapon_tier }
@@ -120,6 +125,7 @@ export async function fetchProfile(db: Db, userId: string): Promise<UserProfile>
     username: userRow.username,
     registeredAt: new Date(userRow.created_at).toISOString(),
     resources,
+    troopMaxUnlocked,
     generals,
   };
 }
@@ -175,8 +181,8 @@ export async function register(db: Db, body: unknown): Promise<{ token: string; 
       generalId,
     ]);
     await client.query(
-      'INSERT INTO generals (id, user_id, name, level, weapon_id, world_id, x, y) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
-      [generalId, userId, STARTER_GENERAL.name, STARTER_GENERAL.level, weaponId, worldId, start.x, start.y],
+      'INSERT INTO generals (id, user_id, name, level, stars, weapon_id, world_id, x, y) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
+      [generalId, userId, STARTER_GENERAL.name, STARTER_GENERAL.level, 1, weaponId, worldId, start.x, start.y],
     );
     for (const unit of STARTER_ARMY) {
       await client.query(
@@ -194,6 +200,8 @@ export async function register(db: Db, body: unknown): Promise<{ token: string; 
       AP_MAX,
       AP_MAX,
     ]);
+    // 养成进度：初始解锁低阶兵种（1-3 级），更高阶需消耗稀有材料逐级解锁
+    await client.query('INSERT INTO progression (user_id, troop_max_unlocked) VALUES ($1, $2)', [userId, 3]);
     await client.query('INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3)', [
       token,
       userId,

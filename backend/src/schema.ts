@@ -75,11 +75,16 @@ const CREATE_TABLES: readonly string[] = [
      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
      name TEXT NOT NULL,
      level INTEGER NOT NULL,
+     stars INTEGER NOT NULL DEFAULT 1,
      weapon_id TEXT REFERENCES weapons(id),
      world_id TEXT REFERENCES worlds(id),
      x INTEGER NOT NULL DEFAULT 0,
      y INTEGER NOT NULL DEFAULT 0,
      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+   )`,
+  `CREATE TABLE IF NOT EXISTS progression (
+     user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+     troop_max_unlocked INTEGER NOT NULL DEFAULT 3
    )`,
   `CREATE TABLE IF NOT EXISTS army_units (
      id TEXT PRIMARY KEY,
@@ -162,6 +167,8 @@ export async function ensureSchema(db: Db): Promise<void> {
       await ensureMarchActiveUnique(client);
       // 旧库补齐野地掉落与刷新字段（CREATE TABLE IF NOT EXISTS 不会给已存在表加列）
       await ensureWildlandRefreshColumns(client);
+      // 旧库补齐武将星级列（养成任务新增，CREATE TABLE IF NOT EXISTS 不会给已存在表加列）
+      await ensureGeneralsStarsColumn(client);
     } finally {
       await client.query('SELECT pg_advisory_unlock(7263)');
     }
@@ -256,4 +263,11 @@ export async function ensureWildlandRefreshColumns(client: PoolClient): Promise<
   await client.query('ALTER TABLE wildlands ADD COLUMN IF NOT EXISTS defeated_at TIMESTAMPTZ');
   // 旧库已存在的野地没有掉落值，按强度补算
   await client.query(`UPDATE wildlands SET drop = GREATEST(1, round(strength / 10.0)) WHERE drop = 0`);
+}
+
+/** 幂等补齐武将的星级列（养成任务新增）：
+ * 旧库由早期 schema 创建时缺该列，会让 fetchProfile/升星失败。
+ * ADD COLUMN IF NOT EXISTS 天然幂等，直接执行即可。 */
+export async function ensureGeneralsStarsColumn(client: PoolClient): Promise<void> {
+  await client.query('ALTER TABLE generals ADD COLUMN IF NOT EXISTS stars INTEGER NOT NULL DEFAULT 1');
 }

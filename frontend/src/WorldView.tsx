@@ -267,7 +267,7 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
       </header>
       <div className="vc-main">
         <aside className="col">
-          <LeftColumn user={user} />
+          <LeftColumn user={user} token={token} onUserUpdate={onUserUpdate} />
         </aside>
         <section className="boardwrap">
           <MapBoard

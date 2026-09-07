@@ -81,6 +81,7 @@ export function RecruitModal({ user, token, ap, onClose, onRecruited }: RecruitM
           </thead>
           <tbody>
             {TROOP_CATALOG.map((t) => {
+              const locked = t.level > user.troopMaxUnlocked;
               const owned = general?.army.find((u) => u.soldierLevel === t.level)?.count ?? 0;
               const totalCost: Resources = {
                 food: t.cost.food * count,
@@ -89,21 +90,23 @@ export function RecruitModal({ user, token, ap, onClose, onRecruited }: RecruitM
                 rare: 0,
               };
               const affordable = food >= totalCost.food && iron >= totalCost.iron && gold >= totalCost.gold;
-              const disabled = busy || !general || !affordable || ap < ACTION_COSTS.recruit;
+              const disabled = busy || !general || locked || !affordable || ap < ACTION_COSTS.recruit;
               return (
                 <tr key={t.level}>
                   <td>{t.level}</td>
-                  <td>{t.name}</td>
+                  <td>{locked ? `${t.name} 🔒` : t.name}</td>
                   <td>{t.power}</td>
                   <td className="n">
-                    粮 {t.cost.food.toLocaleString()}
-                    {t.cost.iron > 0 && <> 铁 {t.cost.iron.toLocaleString()}</>}
-                    {t.cost.gold > 0 && <> 金 {t.cost.gold.toLocaleString()}</>}
+                    {locked
+                      ? '未解锁'
+                      : `粮 ${t.cost.food.toLocaleString()}
+                    ${t.cost.iron > 0 ? ` 铁 ${t.cost.iron.toLocaleString()}` : ''}
+                    ${t.cost.gold > 0 ? ` 金 ${t.cost.gold.toLocaleString()}` : ''}`}
                   </td>
                   <td>×{owned.toLocaleString()}</td>
                   <td>
                     <button type="button" disabled={disabled} onClick={() => doRecruit(t.level)}>
-                      招募
+                      {locked ? '需解锁' : '招募'}
                     </button>
                   </td>
                 </tr>

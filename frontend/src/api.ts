@@ -5,6 +5,7 @@ import type {
   MarchRequest,
   MarchResponse,
   MeResponse,
+  ProgressionResponse,
   RecruitRequest,
   RecruitResponse,
   RegisterRequest,
@@ -98,4 +99,40 @@ export function apiCancelMarch(token: string, marchId: string): Promise<MarchRes
 /** 拉取当前用户最近的战报列表（战报卡展示） */
 export function apiBattleReports(token: string): Promise<BattleReportsResponse> {
   return request<BattleReportsResponse>('/api/battle/reports', { headers: { Authorization: `Bearer ${token}` } });
+}
+
+/** 武将升级：等级 +1，消耗稀有材料；返回更新后的档案 */
+export function apiGeneralLevelUp(token: string, generalId: string): Promise<ProgressionResponse> {
+  return request<ProgressionResponse>('/api/progression/level-up', {
+    method: 'POST',
+    body: JSON.stringify({ generalId }),
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+/** 武将升星：星级 +1，消耗稀有材料；返回更新后的档案 */
+export function apiGeneralStarUp(token: string, generalId: string): Promise<ProgressionResponse> {
+  return request<ProgressionResponse>('/api/progression/star-up', {
+    method: 'POST',
+    body: JSON.stringify({ generalId }),
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+/** 武器升阶：武将武器阶 +1，消耗稀有材料；返回更新后的档案 */
+export function apiWeaponUpgrade(token: string, generalId: string): Promise<ProgressionResponse> {
+  return request<ProgressionResponse>('/api/progression/weapon-upgrade', {
+    method: 'POST',
+    body: JSON.stringify({ generalId }),
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+/** 兵种解锁：逐级解锁更高阶兵种，消耗稀有材料；返回更新后的档案 */
+export function apiTroopUnlock(token: string, troopLevel: number): Promise<ProgressionResponse> {
+  return request<ProgressionResponse>('/api/progression/troop-unlock', {
+    method: 'POST',
+    body: JSON.stringify({ troopLevel }),
+    headers: { Authorization: `Bearer ${token}` },
+  });
 }

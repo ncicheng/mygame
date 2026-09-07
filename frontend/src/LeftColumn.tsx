@@ -1,22 +1,62 @@
+import { useState } from 'react';
 import type { General, UserProfile } from '@mygame/shared';
+import {
+  GENERAL_LEVEL_MAX,
+  GENERAL_STAR_MAX,
+  TROOP_LEVEL_MAX,
+  WEAPON_TIER_MAX,
+  generalLevelUpCost,
+  generalStarUpCost,
+  getTroopType,
+  troopUnlockCost,
+  weaponUpgradeCost,
+} from '@mygame/shared';
+import { apiGeneralLevelUp, apiGeneralStarUp, apiTroopUnlock, apiWeaponUpgrade } from './api';
 
 interface LeftColumnProps {
   user: UserProfile;
+  token: string;
+  /** 养成成功：返回更新后的档案，由上层刷新卡片 */
+  onUserUpdate(user: UserProfile): void;
 }
 
-/** 兵种等级上限（1-15 级）与武器阶数上限（1-20 阶），养成进度条用 */
-const SOLDIER_LEVEL_MAX = 15;
-const WEAPON_TIER_MAX = 20;
-
-/** 左卡片栏：武将卡 + 部队编成卡 + 养成卡 */
-export function LeftColumn({ user }: LeftColumnProps) {
+/** 左卡片栏：武将卡 + 部队编成卡 + 养成卡（升级/强化/解锁按钮 + 进度条） */
+export function LeftColumn({ user, token, onUserUpdate }: LeftColumnProps) {
   const general: General | undefined = user.generals[0];
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
   if (!general) {
     return <section className="card">尚无武将</section>;
   }
   const troopCount = general.army.reduce((sum, unit) => sum + unit.count, 0);
-  const maxSoldierLevel = general.army.reduce((max, unit) => Math.max(max, unit.soldierLevel), 0);
   const weaponTier = general.weapon?.tier ?? 0;
+
+  const rare = user.resources.rare;
+  const unlockNext = user.troopMaxUnlocked + 1;
+  const nextTroopName = unlockNext <= TROOP_LEVEL_MAX ? getTroopType(unlockNext)?.name ?? '' : '';
+
+  const run = async (kind: string, api: () => Promise<{ user: UserProfile }>, okMsg: string) => {
+    if (busy) {
+      return;
+    }
+    setBusy(kind);
+    setMsg(null);
+    try {
+      const res = await api();
+      onUserUpdate(res.user);
+      setMsg(okMsg);
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const generalFull = general.level >= GENERAL_LEVEL_MAX;
+  const starFull = (general.stars ?? 1) >= GENERAL_STAR_MAX;
+  const weaponFull = weaponTier >= WEAPON_TIER_MAX;
+  const troopFull = unlockNext > TROOP_LEVEL_MAX;
 
   return (
     <>
@@ -25,6 +65,7 @@ export function LeftColumn({ user }: LeftColumnProps) {
         <div className="meta">
           <b>{general.name}</b>
           Lv.{general.level}
+          {' ★'.repeat(general.stars ?? 1)}
           <br />
           带兵 {troopCount}
           <br />
@@ -52,20 +93,91 @@ export function LeftColumn({ user }: LeftColumnProps) {
 
       <section className="card">
         <h4>🎖 养成</h4>
-        <div className="trow">
-          <span>兵种解锁</span>
-          <span className="n">{maxSoldierLevel}/{SOLDIER_LEVEL_MAX}</span>
+
+        <div className="prog-row">
+          <div>
+            <div className="trow">
+              <span>武将等级</span>
+              <span className="n">Lv.{general.level}/{GENERAL_LEVEL_MAX}</span>
+            </div>
+            <div className="bar">
+              <i style={{ width: `${Math.round((general.level / GENERAL_LEVEL_MAX) * 100)}%` }} />
+            </div>
+          </div>
+          <button
+            type="button"
+            className="prog-btn"
+            disabled={busy !== null || generalFull || rare < generalLevelUpCost(general.level)}
+            onClick={() => run('lv', () => apiGeneralLevelUp(token, general.id), '武将升级成功')}
+          >
+            {generalFull ? '已满级' : `升级 ${generalLevelUpCost(general.level)}稀有`}
+          </button>
         </div>
-        <div className="bar">
-          <i style={{ width: `${Math.round((maxSoldierLevel / SOLDIER_LEVEL_MAX) * 100)}%` }} />
+
+        <div className="prog-row">
+          <div>
+            <div className="trow">
+              <span>武将星级</span>
+              <span className="n">★{general.stars ?? 1}/{GENERAL_STAR_MAX}</span>
+            </div>
+            <div className="bar">
+              <i style={{ width: `${Math.round(((general.stars ?? 1) / GENERAL_STAR_MAX) * 100)}%` }} />
+            </div>
+          </div>
+          <button
+            type="button"
+            className="prog-btn"
+            disabled={busy !== null || starFull || rare < generalStarUpCost(general.stars ?? 1)}
+            onClick={() => run('star', () => apiGeneralStarUp(token, general.id), '武将升星成功')}
+          >
+            {starFull ? '已满星' : `升星 ${generalStarUpCost(general.stars ?? 1)}稀有`}
+          </button>
         </div>
-        <div className="trow">
-          <span>武器强化</span>
-          <span className="n">{weaponTier}/{WEAPON_TIER_MAX}</span>
+
+        <div className="prog-row">
+          <div>
+            <div className="trow">
+              <span>武器强化</span>
+              <span className="n">{weaponTier}/{WEAPON_TIER_MAX}</span>
+            </div>
+            <div className="bar">
+              <i style={{ width: `${Math.round((weaponTier / WEAPON_TIER_MAX) * 100)}%` }} />
+            </div>
+          </div>
+          <button
+            type="button"
+            className="prog-btn"
+            disabled={busy !== null || weaponFull || rare < weaponUpgradeCost(weaponTier)}
+            onClick={() => run('wep', () => apiWeaponUpgrade(token, general.id), '武器强化成功')}
+          >
+            {weaponFull ? '已满阶' : `强化 ${weaponUpgradeCost(weaponTier)}稀有`}
+          </button>
         </div>
-        <div className="bar">
-          <i style={{ width: `${Math.round((weaponTier / WEAPON_TIER_MAX) * 100)}%` }} />
+
+        <div className="prog-row">
+          <div>
+            <div className="trow">
+              <span>兵种解锁</span>
+              <span className="n">{user.troopMaxUnlocked}/{TROOP_LEVEL_MAX}</span>
+            </div>
+            <div className="bar">
+              <i style={{ width: `${Math.round((user.troopMaxUnlocked / TROOP_LEVEL_MAX) * 100)}%` }} />
+            </div>
+            <div className="trow sub">
+              <span>{troopFull ? '全部兵种已解锁' : `下一档：${nextTroopName} Lv.${unlockNext}`}</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="prog-btn"
+            disabled={busy !== null || troopFull || rare < troopUnlockCost(unlockNext)}
+            onClick={() => run('troop', () => apiTroopUnlock(token, unlockNext), '兵种解锁成功')}
+          >
+            {troopFull ? '已全部解锁' : `解锁 ${troopUnlockCost(unlockNext)}稀有`}
+          </button>
         </div>
+
+        {msg && <div className="recruit-msg">{msg}</div>}
       </section>
     </>
   );

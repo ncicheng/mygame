@@ -4,6 +4,7 @@ import { ensureSchema } from './schema.js';
 import { HttpError } from './http.js';
 import { fetchProfile } from './auth.js';
 import { getActionPoints, trySpendActionPoints } from './actionPoints.js';
+import { getTroopMaxUnlocked } from './progression.js';
 import { ACTION_COSTS, getTroopType, type ActionPoints, type UserProfile } from '@mygame/shared';
 
 /** 招募服务错误：携带 HTTP 状态码与可读信息 */
@@ -58,6 +59,12 @@ export async function recruit(
   const genRes = await db.query('SELECT id FROM generals WHERE id = $1 AND user_id = $2', [generalId, userId]);
   if (genRes.rows.length === 0) {
     throw new RecruitError(400, '武将不存在');
+  }
+
+  // 兵种解锁校验：只能招募已解锁的兵种（初始解锁低阶，更高阶需养成解锁）
+  const maxUnlocked = await getTroopMaxUnlocked(db, userId);
+  if (soldierLevel > maxUnlocked) {
+    throw new RecruitError(400, '兵种未解锁');
   }
 
   const resRes = await db.query('SELECT food, iron, gold FROM resources WHERE user_id = $1', [userId]);

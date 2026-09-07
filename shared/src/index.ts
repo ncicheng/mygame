@@ -30,11 +30,13 @@ export interface Soldier {
   count: number;
 }
 
-/** 武将：独立英雄单位，率领部队；可装备任意阶武器 */
+/** 武将：独立英雄单位，率领部队；可装备任意阶武器，可升级/升星 */
 export interface General {
   id: string;
   name: string;
   level: number;
+  /** 武将星级（1-5），随升星提升 */
+  stars: number;
   weapon: Weapon | null;
   army: Soldier[];
 }
@@ -46,6 +48,8 @@ export interface UserProfile {
   registeredAt: string;
   resources: Resources;
   generals: General[];
+  /** 已解锁的最高兵种等级（兵种解锁进度） */
+  troopMaxUnlocked: number;
 }
 
 /** 注册请求 */
@@ -226,8 +230,37 @@ export interface BattleReportsResponse {
   reports: BattleReport[];
 }
 
+/** 养成请求：升级/升星/强化都以武将定位其等级、星级、装备的武器 */
+export interface GeneralProgressionRequest {
+  generalId: string;
+}
+
+/** 兵种解锁请求：目标兵种等级（须逐级解锁） */
+export interface TroopUnlockRequest {
+  troopLevel: number;
+}
+
+/** 养成响应：更新后的用户档案（资源与武将实时刷新） */
+export interface ProgressionResponse {
+  user: UserProfile;
+}
+
 export { TROOP_CATALOG, getTroopType } from './troops.js';
 export type { TroopType } from './troops.js';
+
+export { WEAPON_CATALOG, WEAPON_TIER_MAX, getWeaponName } from './weapons.js';
+export type { WeaponType } from './weapons.js';
+
+export {
+  GENERAL_LEVEL_MAX,
+  GENERAL_STAR_MAX,
+  TROOP_LEVEL_MAX,
+  INITIAL_TROOP_UNLOCK,
+  generalLevelUpCost,
+  generalStarUpCost,
+  weaponUpgradeCost,
+  troopUnlockCost,
+} from './progression.js';
 
 export {
   GENERAL_BONUS_PER_LEVEL,
@@ -241,6 +274,7 @@ export {
   mulberry32,
   generalMultiplier,
   weaponBonus,
+  effectiveWeaponTier,
   armyPower,
   generalSidePower,
   winProbability,
