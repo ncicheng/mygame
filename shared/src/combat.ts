@@ -9,6 +9,9 @@ import { getTroopType } from './troops.js';
 /** 武将加成：每级 +5%（1 级 = 1.0） */
 export const GENERAL_BONUS_PER_LEVEL = 0.05;
 
+/** 武将星级加成：每星 +10%（1 星 = 无加成） */
+export const GENERAL_BONUS_PER_STAR = 0.1;
+
 /** 武器加成：每阶 +50 战力（无武器 = 0） */
 export const WEAPON_BONUS_PER_TIER = 50;
 
@@ -39,6 +42,7 @@ export interface CombatUnit {
 /** 计算一侧（武将 + 部队）的输入 */
 export interface CombatSideInput {
   generalLevel: number;
+  generalStars: number;
   weaponTier: number | null;
   army: CombatUnit[];
 }
@@ -79,9 +83,9 @@ export function mulberry32(seed: number): () => number {
   };
 }
 
-/** 武将加成系数：1 + (等级-1) × 每级加成 */
-export function generalMultiplier(level: number): number {
-  return 1 + (level - 1) * GENERAL_BONUS_PER_LEVEL;
+/** 武将加成系数：1 + (等级-1) × 每级加成 + (星级-1) × 每星加成 */
+export function generalMultiplier(level: number, stars = 1): number {
+  return 1 + (level - 1) * GENERAL_BONUS_PER_LEVEL + (stars - 1) * GENERAL_BONUS_PER_STAR;
 }
 
 /** 武器加成（阶决定）：无武器返回 0 */
@@ -110,7 +114,7 @@ export function armyPower(army: CombatUnit[]): number {
 
 /** 战斗单位战力：武将加成 × 兵数 × 单兵战力 + 武器加成 */
 export function generalSidePower(input: CombatSideInput): number {
-  return generalMultiplier(input.generalLevel) * armyPower(input.army) + weaponBonus(input.weaponTier);
+  return generalMultiplier(input.generalLevel, input.generalStars) * armyPower(input.army) + weaponBonus(input.weaponTier);
 }
 
 /** 胜率曲线：把双方战力比映射到 [0,1]（=0.5 时均势） */

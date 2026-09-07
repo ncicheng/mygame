@@ -100,9 +100,9 @@ export async function resolveArrivalBattle(
   }
   const wildland = wildRes.rows[0] as { id: string; name: string; strength: number };
 
-  // 读取攻击方武将（等级/武器阶）与部队
+  // 读取攻击方武将（等级/星级/武器阶）与部队
   const genRes = await client.query(
-    `SELECT g.level, g.weapon_id, w.tier AS weapon_tier
+    `SELECT g.level, g.stars, g.weapon_id, w.tier AS weapon_tier
        FROM generals g
        LEFT JOIN weapons w ON w.id = g.weapon_id
       WHERE g.id = $1`,
@@ -111,7 +111,7 @@ export async function resolveArrivalBattle(
   if (genRes.rows.length === 0) {
     return false;
   }
-  const general = genRes.rows[0] as { level: number; weapon_tier: number | null };
+  const general = genRes.rows[0] as { level: number; stars: number; weapon_tier: number | null };
   const armyRes = await client.query(
     'SELECT soldier_level, count FROM army_units WHERE general_id = $1',
     [args.generalId],
@@ -128,6 +128,7 @@ export async function resolveArrivalBattle(
 
   const attackerInput: CombatSideInput = {
     generalLevel: general.level,
+    generalStars: general.stars,
     weaponTier: effectiveTier,
     army,
   };

@@ -178,7 +178,13 @@ export async function troopUnlock(db: Db, token: string, body: unknown): Promise
   if (!(await trySpendRare(db, userId, cost))) {
     throw new ProgressionError(400, '稀有材料不足，无法解锁');
   }
-  await db.query('UPDATE progression SET troop_max_unlocked = $1 WHERE user_id = $2', [troopLevel, userId]);
+  // 幂等 upsert：存量用户（progression 表引入前注册、无行）也能真正写入解锁进度，
+  // 避免 UPDATE 命中 0 行导致「扣了稀有材料但进度不生效」的静默 no-op。
+  await db.query(
+    `INSERT INTO progression (user_id, troop_max_unlocked) VALUES ($1, $2)
+     ON CONFLICT (user_id) DO UPDATE SET troop_max_unlocked = EXCLUDED.troop_max_unlocked`,
+    [userId, troopLevel],
+  );
   return { user: await fetchProfile(db, userId) };
 }
 

@@ -45,6 +45,7 @@ test('战斗单位战力：武将加成 × 兵数 × 单兵战力 + 武器加成
   assert.equal(
     generalSidePower({
       generalLevel: 1,
+      generalStars: 1,
       weaponTier: 1,
       army: [{ soldierLevel: 1, count: 100 }],
     }),
@@ -54,6 +55,7 @@ test('战斗单位战力：武将加成 × 兵数 × 单兵战力 + 武器加成
   assert.equal(
     generalSidePower({
       generalLevel: 2,
+      generalStars: 1,
       weaponTier: 1,
       army: [{ soldierLevel: 1, count: 100 }],
     }),

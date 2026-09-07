@@ -88,7 +88,15 @@ test('养成后战力提升：武将升级/升星提升武将加成、武器升�
   const lv3 = generalSidePower({ generalLevel: 3, weaponTier: 1, army });
   assert.ok(lv3 > lv1, '武将升级应提升战斗单位战力');
   // 武器升阶：1 阶 → 5 阶，武器加成 50→250，战力提升
-  const tier1 = generalSidePower({ generalLevel: 1, weaponTier: 1, army });
-  const tier5 = generalSidePower({ generalLevel: 1, weaponTier: 5, army });
+  const tier1 = generalSidePower({ generalLevel: 1, generalStars: 1, weaponTier: 1, army });
+  const tier5 = generalSidePower({ generalLevel: 1, generalStars: 1, weaponTier: 5, army });
   assert.equal(tier5 - tier1, (5 - 1) * 50, '每升一阶武器战力 +50');
+});
+
+test('养成后战力提升：武将升星提升武将加成、从而提升战斗单位战力', () => {
+  const army = [{ soldierLevel: 1, count: 100 }];
+  // 升星：同等级同武器下，1 星（无星级加成）→ 3 星（+2 星加成），战力随之提升
+  const star1 = generalSidePower({ generalLevel: 1, generalStars: 1, weaponTier: 1, army });
+  const star3 = generalSidePower({ generalLevel: 1, generalStars: 3, weaponTier: 1, army });
+  assert.ok(star3 > star1, '升星应提升战斗单位战力');
 });

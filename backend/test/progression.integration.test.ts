@@ -202,6 +202,24 @@ test('兵种解锁必须逐级：跳过当前最高级返回 400', { skip }, asy
   assert.equal(ok.status, 200);
 });
 
+test('存量用户（无 progression 行）解锁兵种：幂等 upsert 使解锁生效、兵种可招募', { skip }, async () => {
+  const reg = await register(uniqueUsername(), 'secret123');
+  const token = reg.body.token as string;
+  const user = reg.body.user as UserProfile;
+  const generalId = user.generals[0].id;
+  // 模拟存量用户：注册于 progression 表引入之前，无 progression 行
+  await db!.query('DELETE FROM progression WHERE user_id = $1', [user.id]);
+  await grantRare(user.id, 500);
+
+  // 解锁 4 级兵种应真正生效（不能是 200 但实际无进度变化）
+  const unlock = await post(token, '/api/progression/troop-unlock', { troopLevel: INITIAL_TROOP_UNLOCK + 1 });
+  assert.equal(unlock.status, 200);
+
+  // 解锁后该兵种必须可招募（若进度没写库，这里应仍被拒）
+  const ok = await post(token, '/api/recruit', { generalId, soldierLevel: INITIAL_TROOP_UNLOCK + 1, count: 1 });
+  assert.equal(ok.status, 200, '存量用户解锁后应能招募新解锁兵种');
+});
+
 test('兵种解锁稀有材料不足返回 400，进度不变', { skip }, async () => {
   const reg = await register(uniqueUsername(), 'secret123');
   const token = reg.body.token as string;
