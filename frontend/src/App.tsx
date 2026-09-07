@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { UserProfile } from '@mygame/shared';
 import { apiLogout, apiMe } from './api';
-import { AccountView } from './AccountView';
 import { AuthForm } from './AuthForm';
+import { WorldView } from './WorldView';
 
 const TOKEN_KEY = 'mygame_token';
 
@@ -77,7 +77,9 @@ function App() {
       {error && <p style={{ color: 'crimson' }}>{error}</p>}
       {token === null && <AuthForm onAuth={handleAuth} />}
       {token !== null && loading && <p>正在读取存档…</p>}
-      {token !== null && !loading && user !== null && <AccountView user={user} onLogout={handleLogout} />}
+      {token !== null && !loading && user !== null && (
+        <WorldView user={user} token={token} onLogout={handleLogout} />
+      )}
     </main>
   );
 }

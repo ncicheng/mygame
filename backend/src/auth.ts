@@ -1,20 +1,19 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { Db } from './db.js';
 import { ensureSchema } from './schema.js';
+import { HttpError } from './http.js';
 import { hashPassword, verifyPassword } from './password.js';
 import { STARTER_ARMY, STARTER_GENERAL, STARTER_RESOURCES, STARTER_WEAPON } from './starter.js';
-import type { General, Resources, Soldier, UserProfile } from '@mygame/shared';
+import { ensureDefaultWorld, findPlayerStartTile } from './world.js';
+import { AP_MAX, type General, type Resources, type Soldier, type UserProfile } from '@mygame/shared';
 
 /** 会话有效期：30 天 */
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** 认证错误：携带 HTTP 状态码与可读信息 */
-export class AuthError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message);
+export class AuthError extends HttpError {
+  constructor(status: number, message: string) {
+    super(status, message);
     this.name = 'AuthError';
   }
 }
@@ -139,6 +138,10 @@ export async function register(db: Db, body: unknown): Promise<{ token: string; 
     throw new AuthError(409, '用户名已存在');
   }
 
+  // 进入默认世界并为其寻找出生点（主城 + 初始部队位置）
+  const worldId = await ensureDefaultWorld(db);
+  const start = await findPlayerStartTile(db, worldId);
+
   const userId = randomUUID();
   const weaponId = randomUUID();
   const generalId = randomUUID();
@@ -171,19 +174,26 @@ export async function register(db: Db, body: unknown): Promise<{ token: string; 
       STARTER_WEAPON.tier,
       generalId,
     ]);
-    await client.query('INSERT INTO generals (id, user_id, name, level, weapon_id) VALUES ($1, $2, $3, $4, $5)', [
-      generalId,
-      userId,
-      STARTER_GENERAL.name,
-      STARTER_GENERAL.level,
-      weaponId,
-    ]);
+    await client.query(
+      'INSERT INTO generals (id, user_id, name, level, weapon_id, world_id, x, y) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+      [generalId, userId, STARTER_GENERAL.name, STARTER_GENERAL.level, weaponId, worldId, start.x, start.y],
+    );
     for (const unit of STARTER_ARMY) {
       await client.query(
         'INSERT INTO army_units (id, general_id, soldier_type, soldier_level, count) VALUES ($1, $2, $3, $4, $5)',
         [randomUUID(), generalId, unit.soldierType, unit.soldierLevel, unit.count],
       );
     }
+    // 主城与行动点：新玩家满行动点入场
+    await client.query(
+      'INSERT INTO cities (id, world_id, x, y, name, owner_user_id) VALUES ($1, $2, $3, $4, $5, $6)',
+      [randomUUID(), worldId, start.x, start.y, `${username}的主城`, userId],
+    );
+    await client.query('INSERT INTO action_points (user_id, current, max) VALUES ($1, $2, $3)', [
+      userId,
+      AP_MAX,
+      AP_MAX,
+    ]);
     await client.query('INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3)', [
       token,
       userId,

@@ -1,4 +1,11 @@
-import type { AuthResponse, LoginRequest, MeResponse, RegisterRequest, UserProfile } from '@mygame/shared';
+import type {
+  AuthResponse,
+  LoginRequest,
+  MeResponse,
+  RegisterRequest,
+  UserProfile,
+  WorldStateResponse,
+} from '@mygame/shared';
 
 // 生产环境（GitHub Pages）通过构建时注入 VITE_API_BASE_URL 指向后端地址；
 // 开发环境由 Vite 代理 /api 到本地后端，留空即可。
@@ -49,4 +56,9 @@ export async function apiMe(token: string): Promise<UserProfile> {
 /** 登出：使会话 token 失效 */
 export async function apiLogout(token: string): Promise<void> {
   await request('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+}
+
+/** 拉取当前登录用户的世界状态（登录用户视角） */
+export async function apiWorld(token: string): Promise<WorldStateResponse> {
+  return request<WorldStateResponse>('/api/world', { headers: { Authorization: `Bearer ${token}` } });
 }

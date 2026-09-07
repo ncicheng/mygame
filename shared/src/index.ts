@@ -73,3 +73,82 @@ export interface MeResponse {
 export interface ErrorResponse {
   error: string;
 }
+
+/** 地形代码：g=平原 f=林地 m=山地 w=水域 */
+export type Terrain = 'g' | 'f' | 'm' | 'w';
+
+/** 归属方：me=我方 enemy=敌方 */
+export type Side = 'me' | 'enemy';
+
+/** 大地图信息（持久世界，规模可配） */
+export interface WorldInfo {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+}
+
+/** 城池：地图上的战略据点 */
+export interface WorldCity {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  side: Side;
+}
+
+/** 野地（山贼营地）：可被攻打的目标 */
+export interface WorldWildland {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  strength: number;
+}
+
+/** 部队：武将及其率领的兵在地图上的位置 */
+export interface WorldArmy {
+  id: string;
+  generalName: string;
+  x: number;
+  y: number;
+  side: Side;
+  troopCount: number;
+}
+
+/** 行动点：当前/上限 + 恢复信息 */
+export interface ActionPoints {
+  current: number;
+  max: number;
+  recoverMs: number;
+  nextRecoveryAt: string | null;
+}
+
+/** 世界状态响应（登录用户视角） */
+export interface WorldStateResponse {
+  world: WorldInfo;
+  tiles: string[];
+  cities: WorldCity[];
+  wildlands: WorldWildland[];
+  armies: WorldArmy[];
+  actionPoints: ActionPoints;
+}
+
+/** 行动点上限 */
+export const AP_MAX = 5;
+
+/** 行动点恢复周期：每 10 分钟恢复 1 点 */
+export const AP_RECOVER_MS = 10 * 60 * 1000;
+
+/** 行动点消耗规则（出征/打野/攻城），Task 4+ 使用 */
+export const ACTION_COSTS = { march: 1, bandit: 2, siege: 3 } as const;
+
+/** 世界生成配置 */
+export interface WorldConfig {
+  name: string;
+  width: number;
+  height: number;
+  seed: number;
+  enemyCities: number;
+  wildlands: number;
+}

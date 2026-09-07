@@ -1,0 +1,340 @@
+/* ============ 变体 C · 运筹帷幄（桌游指挥台） ============ */
+.vc {
+  position: fixed;
+  inset: 0;
+  background: #f7f0e1;
+  color: #3a3326;
+  font-family: system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.vc-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #fffaf0;
+  border-bottom: 2px solid #e0d3b4;
+}
+
+.vc-top h1 {
+  font-size: 16px;
+  letter-spacing: 2px;
+  color: #7a4e14;
+  margin: 0;
+}
+
+.vc-top .ap {
+  margin-left: auto;
+  background: #7a4e14;
+  color: #ffe9c2;
+  border-radius: 999px;
+  padding: 3px 14px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.vc-top .logout {
+  background: #e7dcc0;
+  color: #7a4e14;
+  border: 1px solid #d6c8a6;
+  border-radius: 999px;
+  padding: 4px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.vc-top .logout:hover {
+  background: #dccfa9;
+}
+
+.vc-top .pl {
+  font-size: 12px;
+  color: #8a7a5e;
+}
+
+.vc-main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 250px 1fr 250px;
+  gap: 12px;
+  padding: 12px;
+  min-height: 0;
+}
+
+.vc-main .col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.vc .card {
+  background: #fff;
+  border: 1px solid #e4d8bc;
+  border-radius: 12px;
+  padding: 10px 12px;
+  box-shadow: 0 2px 6px rgba(90, 60, 20, 0.06);
+}
+
+.vc .card h4 {
+  font-size: 12px;
+  color: #7a4e14;
+  letter-spacing: 1px;
+  margin: 0 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.vc .gcard {
+  display: flex;
+  gap: 10px;
+}
+
+.vc .gcard .portrait {
+  width: 52px;
+  height: 52px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #b8572e, #e8a13a);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  flex-shrink: 0;
+}
+
+.vc .gcard .meta {
+  font-size: 11px;
+  color: #6b5f49;
+  line-height: 1.6;
+}
+
+.vc .gcard .meta b {
+  font-size: 13px;
+  color: #3a3326;
+  display: block;
+}
+
+.vc .trow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  padding: 5px 0;
+  border-bottom: 1px dashed #ece2cc;
+}
+
+.vc .trow:last-child {
+  border-bottom: none;
+}
+
+.vc .trow .n {
+  color: #7a4e14;
+  font-weight: 700;
+}
+
+.vc .bar {
+  height: 8px;
+  background: #eee3cd;
+  border-radius: 99px;
+  overflow: hidden;
+  margin-top: 4px;
+  margin-bottom: 8px;
+}
+
+.vc .bar > i {
+  display: block;
+  height: 100%;
+  background: #b8572e;
+  border-radius: 99px;
+}
+
+.boardwrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  gap: 8px;
+}
+
+.vc .grid {
+  border: 3px solid #b08a3e;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(90, 60, 20, 0.18);
+  display: grid;
+  gap: 0;
+}
+
+.vc .terr-g {
+  background: #cfe0b8;
+}
+
+.vc .terr-f {
+  background: #a5c79a;
+}
+
+.vc .terr-m {
+  background: #d3c9b2;
+}
+
+.vc .terr-w {
+  background: #a8c6e0;
+}
+
+.vc .cell {
+  border: none;
+  border-right: 1px solid rgba(90, 60, 20, 0.15);
+  border-bottom: 1px solid rgba(90, 60, 20, 0.15);
+  border-radius: 2px;
+  padding: 0;
+  cursor: pointer;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.vc .cell:last-child {
+  border-right: none;
+}
+
+.vc .cell:hover {
+  filter: brightness(0.94);
+}
+
+.vc .mk {
+  position: absolute;
+  border-radius: 50%;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 城池标记：小圆点居左下角，可同时显示城内部队 */
+.vc .mk-city-me,
+.vc .mk-city-enm {
+  inset: auto auto 1px 1px;
+  width: 40%;
+  height: 40%;
+  font-size: 6px;
+  line-height: 1;
+}
+
+/* 野地/部队标记：居中大圆点 */
+.vc .mk-bandit,
+.vc .mk-army-me,
+.vc .mk-army-enm {
+  inset: 12%;
+  font-size: 9px;
+  line-height: 1;
+}
+
+.vc .mk-city-me {
+  background: #2f7fe0;
+  color: #fff;
+}
+
+.vc .mk-city-enm {
+  background: #e04f2f;
+  color: #fff;
+}
+
+.vc .mk-bandit {
+  background: #a07a20;
+  color: #fff;
+}
+
+.vc .mk-army-me {
+  background: #1fa7c8;
+  color: #fff;
+}
+
+.vc .mk-army-enm {
+  background: #d04040;
+  color: #fff;
+}
+
+.vc .selbar {
+  background: #fffaf0;
+  border: 1px solid #e4d8bc;
+  border-radius: 999px;
+  padding: 4px 14px;
+  font-size: 12px;
+  color: #7a4e14;
+  text-align: center;
+}
+
+.vc-bottom {
+  display: flex;
+  gap: 10px;
+  padding: 10px 16px;
+  background: #fffaf0;
+  border-top: 2px solid #e0d3b4;
+}
+
+.vc .act {
+  background: #7a4e14;
+  color: #ffe9c2;
+  border: none;
+  border-radius: 10px;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.vc .act .cost {
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 11px;
+}
+
+.vc .act:hover {
+  background: #8f5e1a;
+}
+
+.vc .act:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.vc .act.kind {
+  background: #e7dcc0;
+  color: #7a4e14;
+}
+
+.vc .act.kind:hover {
+  background: #dccfa9;
+}
+
+.vc .apnote {
+  margin-left: auto;
+  align-self: center;
+  font-size: 11px;
+  color: #9c8b6c;
+}
+
+.vc-status {
+  margin: auto;
+  color: #8a7a5e;
+}
+
+.vc-status-error {
+  color: #b02e2e;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+}
