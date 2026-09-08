@@ -24,9 +24,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: 构建前端（注入后端地址）
+      - name: 构建前端（注入 Supabase 配置）
         env:
-          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
         run: npm run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

@@ -1,68 +1,52 @@
 # MyGame — 多人在线实时策略对战
 
-基于持久大地图的多人在线实时策略网页游戏。monorepo 结构：前端 React + Vite + TS → GitHub Pages，后端 Node + Express + Socket.IO + TS → Render/Railway，存储 Postgres，共享类型包 `@mygame/shared`。
+基于持久大地图的多人在线实时策略网页游戏。monorepo 结构：前端 React + Vite + TS → GitHub Pages，存储 Supabase（Postgres + RLS），共享类型包 `@mygame/shared`。无持久后端。
 
 ## 目录结构
 
 ```
-frontend/   React + Vite + TypeScript 前端（Canvas 地图渲染，后续接入）
-backend/    Node + Express + Socket.IO + TypeScript 后端（服务器权威模拟，后续接入）
-shared/     前后端共享的 TypeScript 类型
+frontend/   React + Vite + TypeScript 前端（Canvas 地图渲染，游戏逻辑客户端执行）
+shared/     前后端共享的 TypeScript 纯函数与类型
 .github/    GitHub Actions 部署管道
 ```
 
 ## 环境要求
 
 - Node.js ≥ 22，npm ≥ 10
-- Postgres：本地开发不装也能跑（后端健康检查返回 `db=disconnected`）；集成测试需要真实本地 Postgres（见下）。
+- Supabase 项目（用于认证与数据存储）
 
-## 一条命令启动开发环境
+## 本地开发
 
 ```sh
 npm install
+cp frontend/.env.example frontend/.env   # 填入 Supabase URL 与 anon key
 npm run dev
 ```
 
-- 后端：http://localhost:3001 （健康检查 `GET /api/health`）
-- 前端：http://localhost:5173 （开发服务器把 `/api` 代理到后端）
+- 前端：http://localhost:5173
+- 开发环境数据由浏览器直连 Supabase，无需本地后端。
 
 ## 测试
 
 ```sh
-npm test                 # 单元测试 + 集成测试（未设 DATABASE_URL 时集成测试自动跳过）
-npm run test:integration # 集成测试：必须连真实本地 Postgres
+npm test    # 前端 + shared 单元测试
 ```
 
-集成测试有两种方式提供 Postgres：
+## 环境变量
 
-1. **embedded-postgres（开箱即用，无需系统安装）**：未设置 `DATABASE_URL` 时，`npm run test:integration` 自动启动内置的真实 PostgreSQL 二进制（仅测试过程运行）。
-2. **你自己的本地 Postgres**：设置 `DATABASE_URL` 指向真实实例后运行，例如：
+前端通过 `VITE_SUPABASE_URL` 与 `VITE_SUPABASE_ANON_KEY` 直连 Supabase（见 `frontend/.env.example`）：
 
-   ```sh
-   brew install postgresql@16
-   brew services start postgresql@16
-   createdb mygame_test
-   DATABASE_URL=postgres://localhost:5432/mygame_test npm run test:integration
-   ```
-
-## 后端环境变量
-
-复制 `backend/.env.example` 为 `backend/.env`：
-
-| 变量 | 说明 | 默认 |
-|------|------|------|
-| `DATABASE_URL` | Postgres 连接串，未设置则不连库 | 无 |
-| `PORT` | 后端监听端口 | `3001` |
+| 变量 | 说明 |
+|------|------|
+| `VITE_SUPABASE_URL` | Supabase 项目 URL |
+| `VITE_SUPABASE_ANON_KEY` | Supabase anon public key |
 
 ## 部署
 
-push 到 `main` 后 GitHub Actions 自动构建并部署前端到 GitHub Pages（见 `.github/workflows/deploy.yml`）。
-
-生产环境后端地址在构建前端时注入：
-
-```sh
-VITE_API_BASE_URL=https://your-backend.example.com npm run build
-```
+1. 在 [Supabase](https://supabase.com) 创建项目。
+2. 在项目 SQL 编辑器执行 `supabase/schema.sql` 建表。
+3. 在 GitHub 仓库设置 GitHub Actions variables：`VITE_SUPABASE_URL` 与 `VITE_SUPABASE_ANON_KEY`。
+4. push 到 `main`：GitHub Actions 构建前端（注入上述变量）并自动部署到 GitHub Pages。
 
 ## 文档
 
