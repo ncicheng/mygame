@@ -322,7 +322,7 @@ CREATE POLICY cities_delete ON cities
 
 -- ---------------- wildlands（登录可读；攻打者回写战斗结果） ----------------
 CREATE POLICY wildlands_select ON wildlands
-  FOR SELECT USING (true);
+  FOR SELECT USING (auth.uid() IS NOT NULL);
 CREATE POLICY wildlands_update_attacker ON wildlands
   FOR UPDATE USING (
     EXISTS (
@@ -331,6 +331,33 @@ CREATE POLICY wildlands_update_attacker ON wildlands
         AND b.attacker_user_id = auth.uid()
     )
   );
+
+-- 攻打者 RLS UPDATE 策略只决定"能改哪些行"，但野地为共享数据，不能用 WITH CHECK
+-- 做按列收窄：WITH CHECK 只检查 NEW 行，无法与 OLD 行对比，攻打者凭自身 battle_instances
+-- 匹配即可把 name/strength/坐标等共享列一并改掉。故用 BEFORE UPDATE 触发器做列级守卫：
+-- 仅允许 drop / defeated_at 发生变化，其余列必须保持不变。
+CREATE OR REPLACE FUNCTION wildlands_attacker_update_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.id IS DISTINCT FROM OLD.id
+     OR NEW.world_id IS DISTINCT FROM OLD.world_id
+     OR NEW.x IS DISTINCT FROM OLD.x
+     OR NEW.y IS DISTINCT FROM OLD.y
+     OR NEW.name IS DISTINCT FROM OLD.name
+     OR NEW.strength IS DISTINCT FROM OLD.strength
+     OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+    RAISE EXCEPTION 'wildlands: 攻打者仅允许更新 drop / defeated_at 列';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER wildlands_attacker_update_guard
+  BEFORE UPDATE ON wildlands
+  FOR EACH ROW
+  EXECUTE FUNCTION wildlands_attacker_update_guard();
 
 -- ---------------- progression（仅本人） ----------------
 CREATE POLICY progression_select ON progression
