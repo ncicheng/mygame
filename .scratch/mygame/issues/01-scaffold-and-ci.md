@@ -6,8 +6,8 @@
 
 **Status:** ready-for-agent
 
-- [ ] monorepo 结构（frontend / backend / shared）就绪，TypeScript 全栈
-- [ ] backend 启动后可连接 Postgres 并返回健康检查
-- [ ] frontend 显示 backend 健康检查结果，证明前后端连通
-- [ ] GitHub Actions 在 push 到 main 时自动构建并部署 frontend 到 GitHub Pages
-- [ ] 本地一条命令启动开发环境（frontend + backend 同时起）
+- [x] monorepo 结构（frontend / backend / shared）就绪，TypeScript 全栈
+- [x] backend 启动后可连接 Postgres 并返回健康检查
+- [x] frontend 显示 backend 健康检查结果，证明前后端连通
+- [x] GitHub Actions 在 push 到 main 时自动构建并部署 frontend 到 GitHub Pages
+- [x] 本地一条命令启动开发环境（frontend + backend 同时起）
