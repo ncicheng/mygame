@@ -368,6 +368,17 @@ test('addArmyUnit 按 (general_id,soldier_level) upsert 部队行', async () => 
   assert.deepEqual(ups!.args[1], { onConflict: 'general_id,soldier_level' });
 });
 
+test('addArmyUnit 招募到已有兵堆时累加而非覆盖 count', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    army_units: [{ count: 100 }],
+  });
+  await addArmyUnit(USER, GEN, '乡勇', 1, 50, client);
+  const ups = callsOf('army_units').find((c) => c.method === 'upsert');
+  assert.ok(ups, '应调用 army_units.upsert');
+  const row = ups!.args[0] as Record<string, unknown>;
+  assert.equal(row.count, 150); // 已有 100 + 新增 50 = 累加
+});
+
 test('spendActionPoints 足额则扣减，不足抛中文 Error', async () => {
   const { client, callsOf } = makeFakeSupabase({
     action_points: { current: 3, max: 5, last_recovered_at: new Date().toISOString() },

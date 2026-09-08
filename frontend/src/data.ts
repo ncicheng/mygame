@@ -380,6 +380,15 @@ export async function addArmyUnit(
   count: number,
   client: SupabaseClient = supabase,
 ): Promise<void> {
+  // 先读存量 count，累加后再 upsert，避免覆盖已有兵堆
+  const { data: existing, error: readErr } = await client
+    .from('army_units')
+    .select('count')
+    .eq('general_id', generalId)
+    .eq('soldier_level', soldierLevel)
+    .maybeSingle();
+  if (readErr) throw new Error(`招募失败：${readErr.message}`);
+  const existingCount = existing?.count ?? 0;
   const { error } = await client.from('army_units').upsert(
     {
       id: crypto.randomUUID(),
@@ -387,7 +396,7 @@ export async function addArmyUnit(
       general_id: generalId,
       soldier_type: soldierType,
       soldier_level: soldierLevel,
-      count,
+      count: existingCount + count,
     },
     { onConflict: 'general_id,soldier_level' },
   );
