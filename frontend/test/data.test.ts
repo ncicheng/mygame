@@ -14,6 +14,8 @@ import {
   starUpGeneral,
   upgradeWeapon,
   updateResources,
+  addArmyUnit,
+  spendActionPoints,
 } from '../src/data.js';
 import type { CombatResult, CombatUnit } from '@mygame/shared';
 
@@ -350,4 +352,33 @@ test('读取失败时抛中文 Error', async () => {
     resources: { data: null, error: { message: 'no rows' } },
   });
   await assert.rejects(() => fetchResources(USER, client), /读取资源失败/);
+});
+
+test('addArmyUnit 按 (general_id,soldier_level) upsert 部队行', async () => {
+  const { client, callsOf } = makeFakeSupabase({});
+  await addArmyUnit(USER, GEN, '乡勇', 1, 50, client);
+  const ups = callsOf('army_units').find((c) => c.method === 'upsert');
+  assert.ok(ups, '应调用 army_units.upsert');
+  const row = ups!.args[0] as Record<string, unknown>;
+  assert.equal(row.user_id, USER);
+  assert.equal(row.general_id, GEN);
+  assert.equal(row.soldier_type, '乡勇');
+  assert.equal(row.soldier_level, 1);
+  assert.equal(row.count, 50);
+  assert.deepEqual(ups!.args[1], { onConflict: 'general_id,soldier_level' });
+});
+
+test('spendActionPoints 足额则扣减，不足抛中文 Error', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    action_points: { current: 3, max: 5, last_recovered_at: new Date().toISOString() },
+  });
+  await spendActionPoints(USER, 2, client);
+  const upd = callsOf('action_points').find((c) => c.method === 'update');
+  assert.ok(upd, '应调用 action_points.update');
+  assert.equal((upd!.args[0] as object).current, 1); // 3 - 2
+
+  const poor = makeFakeSupabase({
+    action_points: { current: 1, max: 5, last_recovered_at: new Date().toISOString() },
+  });
+  await assert.rejects(() => spendActionPoints(USER, 2, poor.client), /行动点不足/);
 });

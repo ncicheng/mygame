@@ -371,6 +371,57 @@ export async function createMarch(
   };
 }
 
+/** 招募加兵：按 (general_id, soldier_level) 幂等 upsert，存量行则 count 累加。 */
+export async function addArmyUnit(
+  userId: string,
+  generalId: string,
+  soldierType: string,
+  soldierLevel: number,
+  count: number,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client.from('army_units').upsert(
+    {
+      id: crypto.randomUUID(),
+      user_id: userId,
+      general_id: generalId,
+      soldier_type: soldierType,
+      soldier_level: soldierLevel,
+      count,
+    },
+    { onConflict: 'general_id,soldier_level' },
+  );
+  if (error) throw new Error(`招募失败：${error.message}`);
+}
+
+/** 扣除行动点：先按恢复周期补点再校验足额，扣减后写回（不足抛中文 Error）。 */
+export async function spendActionPoints(
+  userId: string,
+  amount: number,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { data, error } = await client
+    .from('action_points')
+    .select('current,max,last_recovered_at')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw new Error(`扣除行动力失败：${error.message}`);
+  if (!data) throw new Error('行动力数据不存在');
+
+  const last = new Date(data.last_recovered_at);
+  const elapsed = Date.now() - last.getTime();
+  const periods = Math.max(0, Math.floor(elapsed / AP_RECOVER_MS));
+  const recovered = Math.min(data.max, data.current + periods);
+  const newLast = periods > 0 ? new Date(last.getTime() + periods * AP_RECOVER_MS) : last;
+  if (recovered < amount) throw new Error('行动点不足');
+
+  const { error: upErr } = await client
+    .from('action_points')
+    .update({ current: recovered - amount, last_recovered_at: newLast.toISOString() })
+    .eq('user_id', userId);
+  if (upErr) throw new Error(`扣除行动力失败：${upErr.message}`);
+}
+
 /** 取消行军：仅取消本人、仍 active 的行军，置为 cancelled。 */
 export async function cancelMarch(
   userId: string,
