@@ -25,6 +25,7 @@ import {
 } from '@mygame/shared';
 import {
   addArmyUnit,
+  createMarch,
   fetchActionPoints,
   fetchGeneral,
   fetchResources,
@@ -55,6 +56,7 @@ export interface GameDeps {
   levelUpGeneral: typeof persistLevelUpGeneral;
   starUpGeneral: typeof persistStarUpGeneral;
   upgradeWeapon: typeof persistUpgradeWeapon;
+  createMarch: typeof createMarch;
 }
 
 /** 默认依赖：直接使用真实 data.ts 实现。 */
@@ -71,6 +73,7 @@ export const defaultDeps: GameDeps = {
   levelUpGeneral: persistLevelUpGeneral,
   starUpGeneral: persistStarUpGeneral,
   upgradeWeapon: persistUpgradeWeapon,
+  createMarch,
 };
 
 /** 一场打野战斗的战场上下文（决定写库目标与掉落归属）。 */
@@ -150,6 +153,9 @@ export async function settleBattle(
     throw new Error('武将不存在');
   }
 
+  // 打野战斗扣战斗行动点（出征 1 在 issueMarch 扣，这里扣 battle 部分）
+  await deps.spendActionPoints(userId, ACTION_COSTS.bandit);
+
   // 兵-武器等级约束：武器加成按部队最高兵种等级封顶有效阶数
   const maxSoldierLevel = general.army.reduce((max, u) => Math.max(max, u.soldierLevel), 0);
   const effectiveTier = effectiveWeaponTier(general.weapon?.tier ?? null, maxSoldierLevel);
@@ -189,6 +195,38 @@ export async function settleBattle(
   });
 
   return result;
+}
+
+/** 下达行军所需的额外字段（世界/归属/起点/时间），透传给 data.createMarch。 */
+export interface IssueMarchInput {
+  worldId: string;
+  originX: number;
+  originY: number;
+  departedAt: string;
+  arrivesAt: string;
+}
+
+/**
+ * 下达行军编排：先扣 ACTION_COSTS.march 行动点，再落库 active 行军。
+ * 打野流程中本次扣的是「出征」1 点，到达后由 settleBattle 再扣「战斗」部分。
+ */
+export async function issueMarch(
+  userId: string,
+  generalId: string,
+  targetX: number,
+  targetY: number,
+  input: IssueMarchInput,
+  deps: GameDeps = defaultDeps,
+): Promise<WorldMarch> {
+  await deps.spendActionPoints(userId, ACTION_COSTS.march);
+  return deps.createMarch(generalId, targetX, targetY, {
+    worldId: input.worldId,
+    userId,
+    originX: input.originX,
+    originY: input.originY,
+    departedAt: input.departedAt,
+    arrivesAt: input.arrivesAt,
+  });
 }
 
 /** 校验招募入参：兵种等级 1-15、数量为正整数。 */

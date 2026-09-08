@@ -428,3 +428,89 @@ CREATE POLICY battle_reports_update ON battle_reports
   FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 CREATE POLICY battle_reports_delete ON battle_reports
   FOR DELETE USING (auth.uid() = user_id);
+
+-- =============================================================
+-- 15. 新账号初始化：注册后自动播种初始游戏状态
+-- =============================================================
+-- 背景：auth.signUp 只创建 auth 账号，不会建立任何游戏数据。若新玩家
+-- 没有初始武将/资源/行动点/养成进度/世界成员资格，登录后 fetchWorld 会
+-- 报「世界尚未初始化」或空世界 + 无武将 → 无法招募/出征/打野。
+--
+-- 方案：采用「服务端 DB 触发器」（SECURITY DEFINER）在 auth.users 插入
+-- 后立即建档。这是 schema，不是后端代码，天然契合 serverless 架构：
+--   - 无客户端竞态：无需前端首次登录时额外调 ensureNewUser，不会因并发
+--     登录重复播种；
+--   - 触发器以函数所有者（运行本 SQL 的 postgres/supabase_admin，为表
+--     所有者）执行，绕过 RLS，插入不受各表 INSERT 策略限制。
+-- 约束：依赖 Supabase Auth（auth.users）与内置 gen_random_uuid()（PG13+）。
+-- 本地裸 Postgres 无 auth 库时该触发器无法创建——属预期假设，生产在
+-- Supabase 控制台 SQL Editor 执行本文件。
+--
+-- 播种内容（与 shared 常量一致：AP_MAX=5、INITIAL_TROOP_UNLOCK=3）：
+--   - worlds：无世界则新建默认世界「荆州」20×14，否则复用最早的世界；
+--   - weapons：木矛（tier 1，含 1 名初始武将）；
+--   - generals：1 级 1 星「队长」，装备木矛，落位主城旁；
+--   - army_units：100 名乡勇（soldier_level 1）；
+--   - cities：一座主城（owner_user_id = 新用户），与武将相邻；
+--   - resources：初始粮草/铁材/金币（稀有材料从打野产出，初始为 0）；
+--   - action_points：current = max = 5；
+--   - progression：troop_max_unlocked = 3。
+CREATE OR REPLACE FUNCTION seed_new_user()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_world_id text;
+  v_weapon_id text;
+  v_general_id text;
+  v_city_id text;
+  v_cx integer := 3;
+  v_cy integer := 3;
+BEGIN
+  -- 1. 确定世界：复用最早存在的世界，否则新建默认世界
+  SELECT id INTO v_world_id FROM worlds ORDER BY created_at, id LIMIT 1;
+  IF v_world_id IS NULL THEN
+    v_world_id := 'w-default';
+    INSERT INTO worlds (id, name, width, height, seed, created_at)
+    VALUES (v_world_id, '荆州', 20, 14, 1, now());
+  END IF;
+
+  -- 2. 主城：落位 (v_cx, v_cy)，归属新用户
+  v_city_id := gen_random_uuid()::text;
+  INSERT INTO cities (id, world_id, x, y, name, owner_user_id, created_at)
+  VALUES (v_city_id, v_world_id, v_cx, v_cy, '主营', NEW.id, now());
+
+  -- 3. 武器：木矛（tier 1），general_id 暂空，武将建好后再回填
+  v_weapon_id := gen_random_uuid()::text;
+  INSERT INTO weapons (id, user_id, name, tier, general_id)
+  VALUES (v_weapon_id, NEW.id, '木矛', 1, NULL);
+
+  -- 4. 武将：1 级 1 星「队长」，装备木矛，落位主城旁
+  v_general_id := gen_random_uuid()::text;
+  INSERT INTO generals (id, user_id, name, level, stars, weapon_id, world_id, x, y, created_at)
+  VALUES (v_general_id, NEW.id, '队长', 1, 1, v_weapon_id, v_world_id, v_cx + 1, v_cy, now());
+
+  -- 5. 回填武器归属武将（补 weapons -> generals 循环外键）
+  UPDATE weapons SET general_id = v_general_id WHERE id = v_weapon_id;
+
+  -- 6. 初始部队：100 名乡勇
+  INSERT INTO army_units (id, general_id, user_id, soldier_type, soldier_level, count)
+  VALUES (gen_random_uuid()::text, v_general_id, NEW.id, '乡勇', 1, 100);
+
+  -- 7. 资源 / 行动点 / 养成进度
+  INSERT INTO resources (user_id, food, iron, rare, gold)
+  VALUES (NEW.id, 2000, 1000, 0, 500);
+  INSERT INTO action_points (user_id, current, max, last_recovered_at)
+  VALUES (NEW.id, 5, 5, now());
+  INSERT INTO progression (user_id, troop_max_unlocked)
+  VALUES (NEW.id, 3);
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_seed_new_user
+  AFTER INSERT ON auth.users
+  FOR EACH ROW
+  EXECUTE FUNCTION seed_new_user();

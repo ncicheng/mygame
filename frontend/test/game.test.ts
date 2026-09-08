@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   settleBattle,
+  issueMarch,
   computeMarchPosition,
   applyTroopLosses,
   grantWildlandDrop,
@@ -58,6 +59,7 @@ interface DepsRec {
   levelUpGeneral?: ReturnType<typeof rec>;
   starUpGeneral?: ReturnType<typeof rec>;
   upgradeWeapon?: ReturnType<typeof rec>;
+  createMarch?: ReturnType<typeof rec>;
 }
 
 /** 构建带默认实参的 GameDeps；recorded 收集每个函数的调用记录供断言。 */
@@ -84,6 +86,7 @@ function makeDeps(
       levelUpGeneral: pick('levelUpGeneral'),
       starUpGeneral: pick('starUpGeneral'),
       upgradeWeapon: pick('upgradeWeapon'),
+      createMarch: pick('createMarch'),
     },
     rec: r,
   };
@@ -146,6 +149,29 @@ test('settleBattle 战败时掉落为 0 且写入战败', async () => {
   const saved = rec.saveBattleResult!.calls[0] as unknown[];
   assert.equal((saved[3] as Record<string, unknown>).victory, false);
   assert.equal((saved[3] as Record<string, unknown>).droppedRare, 0);
+});
+
+test('settleBattle 打野结算扣战斗行动点（ACTION_COSTS.bandit）', async () => {
+  const { deps, rec } = makeDeps({ fetchGeneral: () => general });
+  const defender = { generalLevel: 1, generalStars: 1, weaponTier: null, army: [{ soldierLevel: 1, count: 1 }] };
+
+  await settleBattle(USER, GEN, defender, ctx, deps);
+
+  const spent = rec.spendActionPoints!.calls[0] as unknown[];
+  assert.deepEqual(spent, [USER, ACTION_COSTS.bandit]);
+});
+
+test('settleBattle 行动点不足则拒绝且不写库', async () => {
+  const { deps, rec } = makeDeps({
+    fetchGeneral: () => general,
+    spendActionPoints: () => {
+      throw new Error('行动点不足');
+    },
+  });
+  const defender = { generalLevel: 1, generalStars: 1, weaponTier: null, army: [{ soldierLevel: 1, count: 1 }] };
+
+  await assert.rejects(() => settleBattle(USER, GEN, defender, ctx, deps), /行动点不足/);
+  assert.equal(rec.saveBattleResult!.calls.length, 0);
 });
 
 // ---------------------------------------------------------------------------
@@ -255,9 +281,9 @@ test('recruitTroop 校验通过则扣资源 + 加兵 + 扣行动点', async () =
   assert.equal(add[3], 1);
   assert.equal(add[4], 2);
 
-  const spend = rec.spendActionPoints!.calls[0] as unknown[];
-  assert.equal(spend[0], USER);
-  assert.equal(spend[1], ACTION_COSTS.recruit);
+  const spent = rec.spendActionPoints!.calls[0] as unknown[];
+  assert.equal(spent[0], USER);
+  assert.equal(spent[1], ACTION_COSTS.recruit);
 });
 
 test('recruitTroop 兵种未解锁则拒绝', async () => {
@@ -283,6 +309,72 @@ test('recruitTroop 行动点不足则拒绝', async () => {
     fetchActionPoints: () => ({ current: 0, max: 5, recoverMs: 600000, nextRecoveryAt: null }),
   });
   await assert.rejects(() => recruitTroop(USER, GEN, 1, 1, deps), /行动点不足/);
+});
+
+// ---------------------------------------------------------------------------
+// issueMarch
+// ---------------------------------------------------------------------------
+
+test('issueMarch 先扣出行军行动点再创建行军', async () => {
+  const { deps, rec } = makeDeps({
+    fetchActionPoints: () => ({ current: 3, max: 5, recoverMs: 600000, nextRecoveryAt: null }),
+    createMarch: () => ({
+      id: 'm1',
+      generalId: GEN,
+      originX: 0,
+      originY: 0,
+      targetX: 5,
+      targetY: 6,
+      departedAt: 'd',
+      arrivesAt: 'a',
+      status: 'active' as const,
+    }),
+  });
+
+  const march = await issueMarch(
+    USER,
+    GEN,
+    5,
+    6,
+    { worldId: 'w1', originX: 0, originY: 0, departedAt: 'd', arrivesAt: 'a' },
+    deps,
+  );
+
+  assert.deepEqual(rec.spendActionPoints!.calls[0], [USER, ACTION_COSTS.march]);
+  assert.equal(rec.createMarch!.calls.length, 1);
+  const created = rec.createMarch!.calls[0] as unknown[];
+  assert.equal(created[0], GEN);
+  assert.equal(created[1], 5);
+  assert.equal(created[2], 6);
+  assert.equal((created[3] as Record<string, unknown>).worldId, 'w1');
+  assert.equal((created[3] as Record<string, unknown>).userId, USER);
+  assert.equal(march.targetX, 5);
+});
+
+test('issueMarch 行动点不足则拒绝且不创建行军', async () => {
+  const { deps, rec } = makeDeps({
+    fetchActionPoints: () => ({ current: 3, max: 5, recoverMs: 600000, nextRecoveryAt: null }),
+    spendActionPoints: () => {
+      throw new Error('行动点不足');
+    },
+    createMarch: () => ({
+      id: 'm1',
+      generalId: GEN,
+      originX: 0,
+      originY: 0,
+      targetX: 5,
+      targetY: 6,
+      departedAt: 'd',
+      arrivesAt: 'a',
+      status: 'active' as const,
+    }),
+  });
+
+  await assert.rejects(
+    () => issueMarch(USER, GEN, 5, 6, { worldId: 'w1', originX: 0, originY: 0, departedAt: 'd', arrivesAt: 'a' }, deps),
+    /行动点不足/,
+  );
+  assert.equal(rec.createMarch!.calls.length, 0);
 });
 
 // ---------------------------------------------------------------------------

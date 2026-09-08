@@ -12,14 +12,13 @@ import { INITIAL_TROOP_UNLOCK, MARCH_TILE_MS } from '@mygame/shared';
 import type { AuthUser } from './auth';
 import {
   cancelMarch,
-  createMarch,
   fetchGeneral,
   fetchReports,
   fetchResources,
   fetchTroopMaxUnlocked,
   fetchWorld,
 } from './data';
-import { computeMarchPosition, settleBattle } from './game';
+import { computeMarchPosition, issueMarch, settleBattle } from './game';
 import { ActionDeck } from './ActionDeck';
 import { BattleOverlay } from './BattleOverlay';
 import { LeftColumn } from './LeftColumn';
@@ -31,6 +30,37 @@ import './world.css';
 interface WorldViewProps {
   user: AuthUser;
   onLogout(): void;
+}
+
+/**
+ * 轮询刷新时保留我方进行中行军的本地插值位置，避免用落库坐标（仍为起点）
+ * 整包覆盖导致部队回弹。仅当新状态里该部队仍为 active 行军时才沿用旧插值，
+ * 否则（行军已到达/取消）交由数据库坐标纠正。
+ */
+function mergeActiveMarchPositions(
+  next: WorldStateResponse,
+  prev: WorldStateResponse | null,
+): WorldStateResponse {
+  if (!prev) {
+    return next;
+  }
+  const marching = new Map<string, { x: number; y: number }>();
+  for (const a of prev.armies) {
+    if (a.side === 'me' && a.march?.status === 'active') {
+      marching.set(a.id, { x: a.x, y: a.y });
+    }
+  }
+  if (marching.size === 0) {
+    return next;
+  }
+  return {
+    ...next,
+    armies: next.armies.map((a) =>
+      a.march?.status === 'active' && marching.has(a.id)
+        ? { ...a, x: marching.get(a.id)!.x, y: marching.get(a.id)!.y }
+        : a,
+    ),
+  };
 }
 
 /** 登录后主界面：变体 C「运筹帷幄」桌游指挥台布局。
@@ -70,7 +100,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
         fetchReports(user.id),
       ]);
       if (w.status === 'fulfilled') {
-        setWorld(w.value);
+        setWorld((prev) => mergeActiveMarchPositions(w.value, prev));
       } else if (showError) {
         setError(w.reason instanceof Error ? w.reason.message : String(w.reason));
       }
@@ -182,7 +212,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
     worldRef.current = world;
   }, [world]);
 
-  const issueMarch = useCallback(
+  const handleIssueMarch = useCallback(
     async (target: MapCell, attack: boolean) => {
       if (!marchArmyId || marching) {
         return;
@@ -199,9 +229,8 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
         const distance = Math.abs(target.x - army.x) + Math.abs(target.y - army.y);
         const departedAt = new Date().toISOString();
         const arrivesAt = new Date(Date.now() + distance * MARCH_TILE_MS).toISOString();
-        const march = await createMarch(generalId, target.x, target.y, {
+        const march = await issueMarch(user.id, generalId, target.x, target.y, {
           worldId: worldNow.world.id,
-          userId: user.id,
           originX: army.x,
           originY: army.y,
           departedAt,
@@ -236,13 +265,13 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
           setMarchErr('请选择野地（山贼营地）目标格发起攻打');
           return;
         }
-        void issueMarch(cell, banditMode);
+        void handleIssueMarch(cell, banditMode);
         return;
       }
       setSelected(cell);
       setMarchErr(null);
     },
-    [marchMode, banditMode, marchArmyId, issueMarch],
+    [marchMode, banditMode, marchArmyId, handleIssueMarch],
   );
 
   const handleArmyClick = useCallback(
