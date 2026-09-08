@@ -1,0 +1,206 @@
+/* ==========================================================================
+ * MyGame 主题系统 theme.css
+ * 仙侠/三国 · 深墨 + 金/青 · 毛玻璃 + 光晕 · 微动效
+ * 统一复用类：.mg-* 系列。登录页与主界面各组件均引入本文件。
+ * ========================================================================== */
+
+:root {
+  /* 配色 */
+  --mg-ink: #0a0e14;        /* 最深墨 */
+  --mg-ink-2: #101724;      /* 深墨 */
+  --mg-ink-3: #1a2230;      /* 面板底 */
+  --mg-jade: #2fd4b0;       /* 青玉 */
+  --mg-gold: #f0b429;       /* 金 */
+  --mg-gold-deep: #d4a24c;  /* 暗金 */
+  --mg-gold-hi: #ffd97a;    /* 亮金 */
+  --mg-red: #e05252;        /* 朱红 */
+  --mg-text: #e8e2d4;       /* 主文字 */
+  --mg-text-dim: #9aa3b2;   /* 次文字 */
+  --mg-glass: rgba(255, 255, 255, 0.06);       /* 毛玻璃底 */
+  --mg-glass-strong: rgba(255, 255, 255, 0.11);
+  --mg-line: rgba(212, 162, 76, 0.35);         /* 金描边 */
+  --mg-glow-gold: 0 0 18px rgba(240, 180, 41, 0.38);
+  --mg-glow-jade: 0 0 18px rgba(47, 212, 176, 0.38);
+  --mg-radius: 14px;
+}
+
+/* 全局深色基座（index.css 亦做全局兜底） */
+body.mg-body {
+  margin: 0;
+  background: var(--mg-ink);
+  color: var(--mg-text);
+  font-family: system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+/* 渐变背景（深墨 → 青/金，仙侠气韵） */
+.mg-gradient {
+  background:
+    radial-gradient(1200px 800px at 15% 10%, rgba(47, 212, 176, 0.16), transparent 60%),
+    radial-gradient(1100px 700px at 85% 90%, rgba(240, 180, 41, 0.14), transparent 60%),
+    linear-gradient(160deg, #0a0e14 0%, #101724 45%, #0c0f16 100%);
+}
+
+/* 通用光晕 */
+.mg-glow-gold {
+  box-shadow: var(--mg-glow-gold);
+}
+
+.mg-glow-jade {
+  box-shadow: var(--mg-glow-jade);
+}
+
+/* 毛玻璃卡片：光晕 + 描边 */
+.mg-card {
+  position: relative;
+  background: var(--mg-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--mg-line);
+  border-radius: var(--mg-radius);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* 金色渐变标题文字 */
+.mg-title {
+  background: linear-gradient(180deg, var(--mg-gold-hi), var(--mg-gold) 55%, var(--mg-gold-deep));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  font-weight: 800;
+  letter-spacing: 2px;
+}
+
+.mg-accent {
+  color: var(--mg-gold);
+}
+
+/* 按钮：hover 缩放 + 发光，禁用态 */
+.mg-btn {
+  --mg-fg: #241a05;
+  background: linear-gradient(160deg, var(--mg-gold-hi), var(--mg-gold) 60%, var(--mg-gold-deep));
+  color: var(--mg-fg);
+  border: 1px solid rgba(255, 224, 150, 0.6);
+  border-radius: 10px;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.mg-btn:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: var(--mg-glow-gold);
+}
+
+.mg-btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+.mg-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+  filter: grayscale(0.4);
+}
+
+.mg-btn:focus-visible,
+.mg-input:focus-visible {
+  outline: 2px solid var(--mg-jade);
+  outline-offset: 2px;
+}
+
+/* 次要按钮：描边金 */
+.mg-btn.ghost {
+  background: transparent;
+  color: var(--mg-gold);
+  border-color: var(--mg-line);
+}
+
+.mg-btn.ghost:hover:not(:disabled) {
+  box-shadow: var(--mg-glow-gold);
+}
+
+/* 输入框 */
+.mg-input {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--mg-line);
+  border-radius: 8px;
+  color: var(--mg-text);
+  padding: 8px 10px;
+  font-size: 14px;
+  width: 100%;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.mg-input:focus-visible {
+  outline: none;
+  border-color: var(--mg-jade);
+  box-shadow: var(--mg-glow-jade);
+}
+
+/* 入场动画 */
+.mg-fade-in {
+  animation: mgFadeIn 0.5s ease both;
+}
+
+.mg-slide-up {
+  animation: mgSlideUp 0.5s ease both;
+}
+
+@keyframes mgFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes mgSlideUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 登录/注册动态背景：星野 + 水墨光晕粒子（纯 CSS 装饰） */
+.mg-backdrop {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  z-index: 0;
+}
+
+.mg-backdrop .star {
+  position: absolute;
+  border-radius: 50%;
+  background: #fff;
+  animation: twinkle ease-in-out infinite;
+}
+
+@keyframes twinkle {
+  0%, 100% { opacity: 0.15; transform: scale(0.8); }
+  50% { opacity: 0.9; transform: scale(1.15); }
+}
+
+.mg-backdrop .orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: 0.45;
+  animation: float 14s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(30px, -30px); }
+}
+
+/* 版权页脚：底部居中、金色微光、克制而醒目 */
+.mg-footer {
+  text-align: center;
+  padding: 10px 0 14px;
+}
+
+.mg-copyright {
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--mg-gold-deep);
+  opacity: 0.9;
+  text-shadow: 0 0 8px rgba(240, 180, 41, 0.25);
+}

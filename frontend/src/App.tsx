@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { getCurrentUser, onAuthChange, signOut, type AuthUser } from './auth';
 import { AuthForm } from './AuthForm';
 import { WorldView } from './WorldView';
+import './theme.css';
 
 function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -51,13 +52,36 @@ function App() {
   }, []);
 
   return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', padding: '2rem', maxWidth: 720 }}>
-      <h1>MyGame — 运筹帷幄</h1>
-      {error && <p style={{ color: 'crimson' }}>{error}</p>}
-      {loading && user === null && <p>正在读取存档…</p>}
+    <>
       {!loading && user === null && <AuthForm />}
       {user !== null && <WorldView user={user} onLogout={handleLogout} />}
-    </main>
+      {loading && user === null && (
+        <main className="mg-gradient" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
+          <p className="mg-title">正在读取存档…</p>
+        </main>
+      )}
+      {error && !loading && user === null && (
+        <div
+          role="alert"
+          className="mg-fade-in"
+          style={{
+            position: 'fixed',
+            top: 16,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'rgba(224,82,82,0.15)',
+            border: '1px solid rgba(224,82,82,0.5)',
+            color: 'var(--mg-red)',
+            padding: '6px 16px',
+            borderRadius: 999,
+            fontSize: 13,
+            zIndex: 50,
+          }}
+        >
+          {error}
+        </div>
+      )}
+    </>
   );
 }
 

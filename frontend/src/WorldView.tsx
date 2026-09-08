@@ -21,6 +21,7 @@ import {
 import { computeMarchPosition, issueMarch, settleBattle } from './game';
 import { ActionDeck } from './ActionDeck';
 import { BattleOverlay } from './BattleOverlay';
+import { CopyrightFooter } from './CopyrightFooter';
 import { LeftColumn } from './LeftColumn';
 import { MapBoard, describeCell, type MapCell } from './MapBoard';
 import { RecruitModal } from './RecruitModal';
@@ -330,7 +331,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
   return (
     <div className="vc">
       <header className="vc-top">
-        <h1>⚔ MyGame 指挥台</h1>
+        <h1 className="mg-title">⚔ MyGame 指挥台</h1>
         <span className="pl">
           {user.email ?? user.id} · Lv.{general?.level ?? 1}
         </span>
@@ -408,6 +409,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
           banditMode={banditMode}
         />
       </footer>
+      <CopyrightFooter />
       {recruiting && (
         <RecruitModal
           userId={user.id}
