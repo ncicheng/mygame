@@ -198,7 +198,9 @@ test('fetchArmyUnits 映射部队行', async () => {
 });
 
 test('createMarch 写入 marches 表并返回 WorldMarch', async () => {
-  const { client, callsOf } = makeFakeSupabase({});
+  const { client, callsOf } = makeFakeSupabase({
+    generals: [{ id: GEN, user_id: USER }],
+  });
   const march = await createMarch(
     GEN,
     5,
@@ -224,6 +226,31 @@ test('createMarch 写入 marches 表并返回 WorldMarch', async () => {
   assert.equal(row.status, 'active');
   assert.equal(march.generalId, GEN);
   assert.equal(march.status, 'active');
+});
+
+test('createMarch 拒绝指挥他人武将（归属校验）', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    generals: [{ id: GEN, user_id: 'someone-else' }],
+  });
+  await assert.rejects(
+    () =>
+      createMarch(
+        GEN,
+        5,
+        6,
+        {
+          worldId: 'w1',
+          userId: USER,
+          originX: 1,
+          originY: 2,
+          departedAt: '2020-01-01T00:00:00Z',
+          arrivesAt: '2020-01-01T00:00:10Z',
+        },
+        client,
+      ),
+    /不能操作他人的部队/,
+  );
+  assert.ok(!callsOf('marches').some((c) => c.method === 'insert'), '归属不符不应写入 marches');
 });
 
 test('cancelMarch 把行军置为 cancelled', async () => {
@@ -355,7 +382,9 @@ test('读取失败时抛中文 Error', async () => {
 });
 
 test('addArmyUnit 按 (general_id,soldier_level) upsert 部队行', async () => {
-  const { client, callsOf } = makeFakeSupabase({});
+  const { client, callsOf } = makeFakeSupabase({
+    generals: [{ id: GEN, user_id: USER }],
+  });
   await addArmyUnit(USER, GEN, '乡勇', 1, 50, client);
   const ups = callsOf('army_units').find((c) => c.method === 'upsert');
   assert.ok(ups, '应调用 army_units.upsert');
@@ -370,6 +399,7 @@ test('addArmyUnit 按 (general_id,soldier_level) upsert 部队行', async () => 
 
 test('addArmyUnit 招募到已有兵堆时累加而非覆盖 count', async () => {
   const { client, callsOf } = makeFakeSupabase({
+    generals: [{ id: GEN, user_id: USER }],
     army_units: [{ count: 100 }],
   });
   await addArmyUnit(USER, GEN, '乡勇', 1, 50, client);
@@ -377,6 +407,14 @@ test('addArmyUnit 招募到已有兵堆时累加而非覆盖 count', async () =>
   assert.ok(ups, '应调用 army_units.upsert');
   const row = ups!.args[0] as Record<string, unknown>;
   assert.equal(row.count, 150); // 已有 100 + 新增 50 = 累加
+});
+
+test('addArmyUnit 拒绝给他人武将招兵（归属校验）', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    generals: [{ id: GEN, user_id: 'someone-else' }],
+  });
+  await assert.rejects(() => addArmyUnit(USER, GEN, '乡勇', 1, 50, client), /不能操作他人的部队/);
+  assert.ok(!callsOf('army_units').some((c) => c.method === 'upsert'), '归属不符不应 upsert');
 });
 
 test('spendActionPoints 足额则扣减，不足抛中文 Error', async () => {

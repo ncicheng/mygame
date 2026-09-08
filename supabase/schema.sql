@@ -323,12 +323,18 @@ CREATE POLICY cities_delete ON cities
 -- ---------------- wildlands（登录可读；攻打者回写战斗结果） ----------------
 CREATE POLICY wildlands_select ON wildlands
   FOR SELECT USING (auth.uid() IS NOT NULL);
+-- 攻打者回写仅允许「真实打赢」：匹配的 battle_instances 必须是该攻击者发起且
+-- winner='attacker'，且目标野地尚未被攻破（defeated_at IS NULL 防止重复改写）。
+-- 防御纵深：即便用户能自行 INSERT 伪造 battle_instances，也至少要求伪造行声明
+-- 攻击者胜，并与 UPDATE USING 的 defeated_at 守卫共同兜底，避免任意改任意野地。
 CREATE POLICY wildlands_update_attacker ON wildlands
   FOR UPDATE USING (
-    EXISTS (
+    defeated_at IS NULL
+    AND EXISTS (
       SELECT 1 FROM battle_instances b
       WHERE b.defender_wildland_id = id
         AND b.attacker_user_id = auth.uid()
+        AND b.winner = 'attacker'
     )
   );
 
@@ -389,21 +395,31 @@ CREATE POLICY action_points_update ON action_points
 CREATE POLICY action_points_delete ON action_points
   FOR DELETE USING (auth.uid() = user_id);
 
--- ---------------- army_units（仅本人） ----------------
+-- ---------------- army_units（仅本人；general_id 须归本人） ----------------
 CREATE POLICY army_units_select ON army_units
   FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY army_units_insert ON army_units
-  FOR INSERT WITH CHECK (auth.uid() = user_id);
+  FOR INSERT WITH CHECK (
+    auth.uid() = user_id
+    AND EXISTS (
+      SELECT 1 FROM generals g WHERE g.id = general_id AND g.user_id = auth.uid()
+    )
+  );
 CREATE POLICY army_units_update ON army_units
   FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 CREATE POLICY army_units_delete ON army_units
   FOR DELETE USING (auth.uid() = user_id);
 
--- ---------------- marches（仅本人） ----------------
+-- ---------------- marches（仅本人；general_id 须归本人） ----------------
 CREATE POLICY marches_select ON marches
   FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY marches_insert ON marches
-  FOR INSERT WITH CHECK (auth.uid() = user_id);
+  FOR INSERT WITH CHECK (
+    auth.uid() = user_id
+    AND EXISTS (
+      SELECT 1 FROM generals g WHERE g.id = general_id AND g.user_id = auth.uid()
+    )
+  );
 CREATE POLICY marches_update ON marches
   FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 CREATE POLICY marches_delete ON marches
@@ -465,8 +481,15 @@ DECLARE
   v_weapon_id text;
   v_general_id text;
   v_city_id text;
-  v_cx integer := 3;
-  v_cy integer := 3;
+  v_cx integer;
+  v_cy integer;
+  v_hash integer;
+  v_world_w integer;
+  v_world_h integer;
+  v_base integer;
+  v_idx integer;
+  v_off integer;
+  v_occupied boolean;
 BEGIN
   -- 1. 确定世界：复用最早存在的世界，否则新建默认世界
   SELECT id INTO v_world_id FROM worlds ORDER BY created_at, id LIMIT 1;
@@ -476,29 +499,65 @@ BEGIN
     VALUES (v_world_id, '荆州', 20, 14, 1, now());
   END IF;
 
-  -- 2. 主城：落位 (v_cx, v_cy)，归属新用户
+  -- 2. 主城：在共享世界里为每个用户挑一个不重复的格子落位，归属新用户。
+  --    共享世界对所有人可见，若全落固定 (3,3) 则第二个用户撞
+  --    cities UNIQUE(world_id, x, y) 会异常上抛导致 auth.users 建档失败。
+  --    方案：以 NEW.id 的哈希确定起始格，再逐格扫描首个空闲格
+  --    （空闲 = 该格无城池，且其右侧相邻格无城池/武将，保证武将能并排落位）。
+  SELECT width, height INTO v_world_w, v_world_h FROM worlds WHERE id = v_world_id;
+  v_hash := abs(hashtext(NEW.id));
+  v_base := ((v_hash / v_world_w) % v_world_h) * v_world_w + (v_hash % v_world_w); -- 0..w*h-1
+  FOR v_off IN 0..(v_world_w * v_world_h - 1) LOOP
+    v_idx := (v_base + v_off) % (v_world_w * v_world_h);
+    v_cx := (v_idx % v_world_w) + 1;
+    v_cy := (v_idx / v_world_w) + 1;
+    v_occupied := EXISTS (
+        SELECT 1 FROM cities c
+        WHERE c.world_id = v_world_id AND c.x = v_cx AND c.y = v_cy
+      );
+    IF NOT v_occupied THEN
+      IF v_cx >= v_world_w THEN
+        -- 城市落在最右列，右侧无格放武将，跳过该格
+        v_occupied := TRUE;
+      ELSE
+        -- 武将落位 (cx+1, cy)，需右侧格也无城池/武将
+        v_occupied := EXISTS (
+            SELECT 1 FROM cities c
+            WHERE c.world_id = v_world_id AND c.x = v_cx + 1 AND c.y = v_cy
+          ) OR EXISTS (
+            SELECT 1 FROM generals g
+            WHERE g.world_id = v_world_id AND g.x = v_cx + 1 AND g.y = v_cy
+          );
+      END IF;
+    END IF;
+    IF NOT v_occupied THEN
+      EXIT;
+    END IF;
+  END LOOP;
+
+  -- 3. 主城写入（v_cx, v_cy 已确定）
   v_city_id := gen_random_uuid()::text;
   INSERT INTO cities (id, world_id, x, y, name, owner_user_id, created_at)
   VALUES (v_city_id, v_world_id, v_cx, v_cy, '主营', NEW.id, now());
 
-  -- 3. 武器：木矛（tier 1），general_id 暂空，武将建好后再回填
+  -- 4. 武器：木矛（tier 1），general_id 暂空，武将建好后再回填
   v_weapon_id := gen_random_uuid()::text;
   INSERT INTO weapons (id, user_id, name, tier, general_id)
   VALUES (v_weapon_id, NEW.id, '木矛', 1, NULL);
 
-  -- 4. 武将：1 级 1 星「队长」，装备木矛，落位主城旁
+  -- 5. 武将：1 级 1 星「队长」，装备木矛，紧邻主城右侧 (v_cx+1, v_cy) 落位
   v_general_id := gen_random_uuid()::text;
   INSERT INTO generals (id, user_id, name, level, stars, weapon_id, world_id, x, y, created_at)
   VALUES (v_general_id, NEW.id, '队长', 1, 1, v_weapon_id, v_world_id, v_cx + 1, v_cy, now());
 
-  -- 5. 回填武器归属武将（补 weapons -> generals 循环外键）
+  -- 6. 回填武器归属武将（补 weapons -> generals 循环外键）
   UPDATE weapons SET general_id = v_general_id WHERE id = v_weapon_id;
 
-  -- 6. 初始部队：100 名乡勇
+  -- 7. 初始部队：100 名乡勇
   INSERT INTO army_units (id, general_id, user_id, soldier_type, soldier_level, count)
   VALUES (gen_random_uuid()::text, v_general_id, NEW.id, '乡勇', 1, 100);
 
-  -- 7. 资源 / 行动点 / 养成进度
+  -- 8. 资源 / 行动点 / 养成进度
   INSERT INTO resources (user_id, food, iron, rare, gold)
   VALUES (NEW.id, 2000, 1000, 0, 500);
   INSERT INTO action_points (user_id, current, max, last_recovered_at)

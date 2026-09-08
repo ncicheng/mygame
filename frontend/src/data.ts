@@ -260,6 +260,8 @@ export async function fetchWorld(
     .eq('world_id', worldId)
     .order('created_at');
   if (cityErr) throw new Error(`读取城池失败：${cityErr.message}`);
+  // 注意：RLS 的 cities_select 仅返回本人城池，故 side 恒为 'me'，'enemy' 分支不可达。
+  // 这是已接受的 PvE 限制——共享世界里敌方城池当前不可见，代码保留 'enemy' 以便未来开放 PvP。
   const cities: WorldCity[] = (cityRows ?? []).map((r) => ({
     id: r.id,
     name: r.name,
@@ -290,14 +292,14 @@ export async function fetchWorld(
     .order('created_at');
   if (armyErr) throw new Error(`读取部队失败：${armyErr.message}`);
   const armies: WorldArmy[] = [];
-  for (const r of armyRows ?? []) {
-    const { data: unitRows, error: unitErr } = await client
+  for (const r of armyRows ?? []) {    const { data: unitRows, error: unitErr } = await client
       .from('army_units')
       .select('count')
       .eq('general_id', r.id);
     if (unitErr) throw new Error(`读取部队失败：${unitErr.message}`);
     const troopCount = (unitRows ?? []).reduce((sum, u) => sum + (u.count ?? 0), 0);
     const march = await fetchActiveMarch(r.id, client);
+    // 同 cities：RLS 的 generals_select 仅返回本人武将，side 恒为 'me'，'enemy' 不可达。
     armies.push({
       id: r.id,
       generalName: r.name,
@@ -334,6 +336,24 @@ export interface CreateMarchInput {
   arrivesAt: string;
 }
 
+/** 归属校验：general_id 必须属于该用户，否则抛中文 Error（防占用他人行军/挂兵）。 */
+async function assertGeneralOwnership(
+  generalId: string,
+  userId: string,
+  action: string,
+  client: SupabaseClient,
+): Promise<void> {
+  const { data: gen, error } = await client
+    .from('generals')
+    .select('user_id')
+    .eq('id', generalId)
+    .maybeSingle();
+  if (error) throw new Error(`${action}失败：${error.message}`);
+  if (!gen || gen.user_id !== userId) {
+    throw new Error(`${action}失败：不能操作他人的部队`);
+  }
+}
+
 /** 创建一条 active 行军记录并返回领域对象。 */
 export async function createMarch(
   generalId: string,
@@ -342,6 +362,8 @@ export async function createMarch(
   input: CreateMarchInput,
   client: SupabaseClient = supabase,
 ): Promise<WorldMarch> {
+  // 归属校验：只能为本人的武将发起行军，防止占用他人 active 行军槽位
+  await assertGeneralOwnership(generalId, input.userId, '创建行军', client);
   const marchId = crypto.randomUUID();
   const row = {
     id: marchId,
@@ -380,6 +402,8 @@ export async function addArmyUnit(
   count: number,
   client: SupabaseClient = supabase,
 ): Promise<void> {
+  // 归属校验：只能给自己的武将招兵，防止把兵挂到陌生武将名下
+  await assertGeneralOwnership(generalId, userId, '招募', client);
   // 先读存量 count，累加后再 upsert，避免覆盖已有兵堆
   const { data: existing, error: readErr } = await client
     .from('army_units')
