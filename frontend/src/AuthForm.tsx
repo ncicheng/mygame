@@ -1,15 +1,10 @@
 import { useState, type FormEvent } from 'react';
-import type { UserProfile } from '@mygame/shared';
-import { ApiError, apiLogin, apiRegister } from './api';
+import { signIn, signUp } from './auth';
 
-interface AuthFormProps {
-  onAuth(token: string, user: UserProfile): void;
-}
-
-/** 登录/注册表单：新注册自动领取初始武将与资源 */
-export function AuthForm({ onAuth }: AuthFormProps) {
+/** 登录/注册表单：成功后由 onAuthChange 自动推进到游戏界面 */
+export function AuthForm() {
   const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -19,11 +14,14 @@ export function AuthForm({ onAuth }: AuthFormProps) {
     setError(null);
     setBusy(true);
     try {
-      const { token, user } =
-        mode === 'login' ? await apiLogin(username, password) : await apiRegister(username, password);
-      onAuth(token, user);
+      if (mode === 'login') {
+        await signIn(email, password);
+      } else {
+        await signUp(email, password);
+      }
+      // 成功后 App 的 onAuthChange 会收到新会话，无需在此更新状态
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : '网络错误，请稍后重试');
+      setError(err instanceof Error ? err.message : '网络错误，请稍后重试');
     } finally {
       setBusy(false);
     }
@@ -33,11 +31,11 @@ export function AuthForm({ onAuth }: AuthFormProps) {
     <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.75rem', maxWidth: 320 }}>
       <h2>{mode === 'login' ? '登录' : '注册'}</h2>
       <label>
-        用户名
+        邮箱
         <input
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          autoComplete="username"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          autoComplete="email"
           style={{ display: 'block', marginTop: 4 }}
         />
       </label>
@@ -53,7 +51,7 @@ export function AuthForm({ onAuth }: AuthFormProps) {
       </label>
       {error && <p style={{ color: 'crimson', margin: 0 }}>{error}</p>}
       <button type="submit" disabled={busy}>
-        {busy ? '处理中…' : mode === 'login' ? '登录' : '注册并领取初始武将'}
+        {busy ? '处理中…' : mode === 'login' ? '登录' : '注册'}
       </button>
       <button
         type="button"

@@ -5,7 +5,7 @@ import { supabase } from './supabase';
 export type AuthUser = { id: string; email?: string };
 
 /** 注册：新建账号。出错时抛带中文 message 的 Error。
- * 可选 client 参数便于测试注入假客户端（与 realtime.ts 同款模式）。 */
+ * 可选 client 参数便于测试注入假客户端。 */
 export async function signUp(
   email: string,
   password: string,
