@@ -506,7 +506,9 @@ BEGIN
   --    方案：以 NEW.id 的哈希确定起始格，再逐格扫描首个空闲格
   --    （空闲 = 该格无城池，且其右侧相邻格无城池/武将，保证武将能并排落位）。
   SELECT width, height INTO v_world_w, v_world_h FROM worlds WHERE id = v_world_id;
-  v_hash := abs(hashtext(NEW.id));
+  -- NEW.id 是 uuid，hashtext 需 text；uuid→text 是赋值级转换，函数实参须显式 ::text，
+  -- 否则运行时抛 "function hashtext(uuid) does not exist" 导致注册回滚。
+  v_hash := abs(hashtext(NEW.id::text));
   v_base := ((v_hash / v_world_w) % v_world_h) * v_world_w + (v_hash % v_world_w); -- 0..w*h-1
   FOR v_off IN 0..(v_world_w * v_world_h - 1) LOOP
     v_idx := (v_base + v_off) % (v_world_w * v_world_h);
@@ -566,6 +568,10 @@ BEGIN
   INSERT INTO progression (user_id, troop_max_unlocked)
   VALUES (NEW.id, 3);
 
+  RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+  -- 种子失败不阻断注册：记录告警并放行，避免 auth.users 插入被回滚。
+  RAISE WARNING 'seed_new_user 失败 user=% msg=%', NEW.id, SQLERRM;
   RETURN NEW;
 END;
 $$;
