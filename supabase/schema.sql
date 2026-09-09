@@ -471,6 +471,57 @@ CREATE POLICY battle_reports_delete ON battle_reports
 --   - resources：初始粮草/铁材/金币（稀有材料从打野产出，初始为 0）；
 --   - action_points：current = max = 5；
 --   - progression：troop_max_unlocked = 3。
+-- 世界内容播种：为世界生成地形网格与野地（幂等：已有地形则跳过）。
+-- world_tiles/wildlands 为共享只读（RLS 禁止客户端写），须由服务端（SECURITY DEFINER）播种。
+CREATE OR REPLACE FUNCTION seed_world_content(p_world_id text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_w integer;
+  v_h integer;
+  v_x integer;
+  v_y integer;
+  v_terrain text;
+  v_hash bigint;
+BEGIN
+  SELECT width, height INTO v_w, v_h FROM worlds WHERE id = p_world_id;
+  IF v_w IS NULL OR v_h IS NULL THEN RETURN; END IF;
+  -- 已有地形则跳过（幂等，避免重复播种）
+  IF EXISTS (SELECT 1 FROM world_tiles WHERE world_id = p_world_id LIMIT 1) THEN
+    RETURN;
+  END IF;
+  -- 地形网格：按 (x,y) 确定性哈希映射到 g(平原)/f(林地)/m(山地)/w(水域)
+  FOR v_y IN 1..v_h LOOP
+    FOR v_x IN 1..v_w LOOP
+      v_hash := abs(hashtext(p_world_id || ':' || v_x || ',' || v_y)::bigint) % 100;
+      v_terrain := CASE
+        WHEN v_hash <= 55 THEN 'g'
+        WHEN v_hash <= 75 THEN 'f'
+        WHEN v_hash <= 88 THEN 'm'
+        ELSE 'w'
+      END;
+      INSERT INTO world_tiles (world_id, x, y, terrain)
+      VALUES (p_world_id, v_x, v_y, v_terrain);
+    END LOOP;
+  END LOOP;
+  -- 撒野地（多难度，攻破后按 WILDLAND_REFRESH_MS 刷新）
+  INSERT INTO wildlands (id, world_id, x, y, name, strength, drop)
+  SELECT
+    gen_random_uuid()::text, p_world_id, x, y, name, strength, GREATEST(1, round(strength/10))
+  FROM (VALUES
+    ( 3, 3,'山贼营地', 10),
+    ( 8, 6,'强盗窝',  15),
+    (12, 4,'流寇寨',  20),
+    (16, 9,'悍匪堡',  30),
+    ( 6,11,'贼首营寨', 40),
+    (14,12,'巨寇巢穴', 50)
+  ) AS w(x, y, name, strength);
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION seed_new_user()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -499,6 +550,9 @@ BEGIN
     INSERT INTO worlds (id, name, width, height, seed, created_at)
     VALUES (v_world_id, '荆州', 20, 14, 1, now());
   END IF;
+
+  -- 播种世界内容（地形网格 + 野地）：幂等，已有地形则跳过
+  PERFORM seed_world_content(v_world_id);
 
   -- 2. 主城：在共享世界里为每个用户挑一个不重复的格子落位，归属新用户。
   --    共享世界对所有人可见，若全落固定 (3,3) 则第二个用户撞
