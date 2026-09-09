@@ -648,7 +648,8 @@ CREATE TABLE guild_members (
   guild_id text NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   joined_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (guild_id, user_id)
+  PRIMARY KEY (guild_id, user_id),
+  UNIQUE (user_id)  -- 单军团：一名玩家只属于一个军团
 );
 
 ALTER TABLE guilds ENABLE ROW LEVEL SECURITY;
