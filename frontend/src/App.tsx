@@ -1,46 +1,28 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { UserProfile } from '@mygame/shared';
-import { apiLogout, apiMe } from './api';
+import { getCurrentUser, onAuthChange, signOut, type AuthUser } from './auth';
 import { AuthForm } from './AuthForm';
 import { WorldView } from './WorldView';
-
-const TOKEN_KEY = 'mygame_token';
-
-function readToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
-}
+import './theme.css';
 
 function App() {
-  const [token, setToken] = useState<string | null>(() => readToken());
-  const [user, setUser] = useState<UserProfile | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(token !== null);
+  const [loading, setLoading] = useState(true);
 
-  // 有 token 时拉取用户档案（会话持久：刷新页面后仍保持登录）
+  // 恢复会话 + 订阅认证状态变化（Supabase 自己管理 token，无需手动存储）
   useEffect(() => {
-    if (!token) {
-      setUser(null);
-      setLoading(false);
-      return;
-    }
     let cancelled = false;
-    setLoading(true);
-    apiMe(token)
+    getCurrentUser()
       .then((u) => {
         if (cancelled) {
           return;
         }
         setUser(u);
-        setError(null);
       })
       .catch((err: unknown) => {
         if (cancelled) {
           return;
         }
-        // token 失效或网络异常：清除本地会话，回到登录页
-        localStorage.removeItem(TOKEN_KEY);
-        setToken(null);
-        setUser(null);
         setError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => {
@@ -48,44 +30,58 @@ function App() {
           setLoading(false);
         }
       });
+    // 登录/注册/登出后回调收敛为 AuthUser（null = 未登录）
+    const unsub = onAuthChange((u) => {
+      setUser(u);
+      setError(null);
+      setLoading(false);
+    });
     return () => {
       cancelled = true;
+      unsub();
     };
-  }, [token]);
-
-  const handleAuth = useCallback((newToken: string, newUser: UserProfile) => {
-    localStorage.setItem(TOKEN_KEY, newToken);
-    setToken(newToken);
-    setUser(newUser);
-    setError(null);
   }, []);
 
-  const handleLogout = useCallback(() => {
-    if (token) {
-      apiLogout(token).catch(() => {
-        // 登出失败不阻塞本地退出
-      });
+  const handleLogout = useCallback(async () => {
+    try {
+      await signOut();
+    } catch {
+      // 登出失败不阻塞本地退出
     }
-    localStorage.removeItem(TOKEN_KEY);
-    setToken(null);
     setUser(null);
-  }, [token]);
-
-  // 招募等业务会改变用户档案（资源/部队），提升到 App 以驱动各卡片实时刷新
-  const handleUserUpdate = useCallback((newUser: UserProfile) => {
-    setUser(newUser);
   }, []);
 
   return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', padding: '2rem', maxWidth: 720 }}>
-      <h1>MyGame — 运筹帷幄</h1>
-      {error && <p style={{ color: 'crimson' }}>{error}</p>}
-      {token === null && <AuthForm onAuth={handleAuth} />}
-      {token !== null && loading && <p>正在读取存档…</p>}
-      {token !== null && !loading && user !== null && (
-        <WorldView user={user} token={token} onLogout={handleLogout} onUserUpdate={handleUserUpdate} />
+    <>
+      {!loading && user === null && <AuthForm />}
+      {user !== null && <WorldView user={user} onLogout={handleLogout} />}
+      {loading && user === null && (
+        <main className="mg-gradient" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
+          <p className="mg-title">正在读取存档…</p>
+        </main>
       )}
-    </main>
+      {error && !loading && user === null && (
+        <div
+          role="alert"
+          className="mg-fade-in"
+          style={{
+            position: 'fixed',
+            top: 16,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'rgba(224,82,82,0.15)',
+            border: '1px solid rgba(224,82,82,0.5)',
+            color: 'var(--mg-red)',
+            padding: '6px 16px',
+            borderRadius: 999,
+            fontSize: 13,
+            zIndex: 50,
+          }}
+        >
+          {error}
+        </div>
+      )}
+    </>
   );
 }
 

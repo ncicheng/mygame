@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { General, UserProfile } from '@mygame/shared';
+import type { General } from '@mygame/shared';
 import {
   GENERAL_LEVEL_MAX,
   GENERAL_STAR_MAX,
@@ -11,18 +11,21 @@ import {
   troopUnlockCost,
   weaponUpgradeCost,
 } from '@mygame/shared';
-import { apiGeneralLevelUp, apiGeneralStarUp, apiTroopUnlock, apiWeaponUpgrade } from './api';
+import { levelUpGeneral, starUpGeneral, unlockTroop, upgradeWeapon } from './game';
 
 interface LeftColumnProps {
-  user: UserProfile;
-  token: string;
-  /** 养成成功：返回更新后的档案，由上层刷新卡片 */
-  onUserUpdate(user: UserProfile): void;
+  userId: string;
+  general: General | null;
+  /** 稀有材料余额（用于按钮置灰与成本展示） */
+  rare: number;
+  /** 已解锁的最高兵种等级 */
+  troopMaxUnlocked: number;
+  /** 养成成功：由上层刷新世界与玩家数据 */
+  onChanged(): void;
 }
 
 /** 左卡片栏：武将卡 + 部队编成卡 + 养成卡（升级/强化/解锁按钮 + 进度条） */
-export function LeftColumn({ user, token, onUserUpdate }: LeftColumnProps) {
-  const general: General | undefined = user.generals[0];
+export function LeftColumn({ userId, general, rare, troopMaxUnlocked, onChanged }: LeftColumnProps) {
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -32,19 +35,18 @@ export function LeftColumn({ user, token, onUserUpdate }: LeftColumnProps) {
   const troopCount = general.army.reduce((sum, unit) => sum + unit.count, 0);
   const weaponTier = general.weapon?.tier ?? 0;
 
-  const rare = user.resources.rare;
-  const unlockNext = user.troopMaxUnlocked + 1;
+  const unlockNext = troopMaxUnlocked + 1;
   const nextTroopName = unlockNext <= TROOP_LEVEL_MAX ? getTroopType(unlockNext)?.name ?? '' : '';
 
-  const run = async (kind: string, api: () => Promise<{ user: UserProfile }>, okMsg: string) => {
+  const run = async (kind: string, action: () => Promise<void>, okMsg: string) => {
     if (busy) {
       return;
     }
     setBusy(kind);
     setMsg(null);
     try {
-      const res = await api();
-      onUserUpdate(res.user);
+      await action();
+      onChanged();
       setMsg(okMsg);
     } catch (err) {
       setMsg(err instanceof Error ? err.message : String(err));
@@ -108,7 +110,7 @@ export function LeftColumn({ user, token, onUserUpdate }: LeftColumnProps) {
             type="button"
             className="prog-btn"
             disabled={busy !== null || generalFull || rare < generalLevelUpCost(general.level)}
-            onClick={() => run('lv', () => apiGeneralLevelUp(token, general.id), '武将升级成功')}
+            onClick={() => run('lv', () => levelUpGeneral(userId, general.id), '武将升级成功')}
           >
             {generalFull ? '已满级' : `升级 ${generalLevelUpCost(general.level)}稀有`}
           </button>
@@ -128,7 +130,7 @@ export function LeftColumn({ user, token, onUserUpdate }: LeftColumnProps) {
             type="button"
             className="prog-btn"
             disabled={busy !== null || starFull || rare < generalStarUpCost(general.stars ?? 1)}
-            onClick={() => run('star', () => apiGeneralStarUp(token, general.id), '武将升星成功')}
+            onClick={() => run('star', () => starUpGeneral(userId, general.id), '武将升星成功')}
           >
             {starFull ? '已满星' : `升星 ${generalStarUpCost(general.stars ?? 1)}稀有`}
           </button>
@@ -148,7 +150,7 @@ export function LeftColumn({ user, token, onUserUpdate }: LeftColumnProps) {
             type="button"
             className="prog-btn"
             disabled={busy !== null || weaponFull || rare < weaponUpgradeCost(weaponTier)}
-            onClick={() => run('wep', () => apiWeaponUpgrade(token, general.id), '武器强化成功')}
+            onClick={() => run('wep', () => upgradeWeapon(userId, general.id), '武器强化成功')}
           >
             {weaponFull ? '已满阶' : `强化 ${weaponUpgradeCost(weaponTier)}稀有`}
           </button>
@@ -158,10 +160,10 @@ export function LeftColumn({ user, token, onUserUpdate }: LeftColumnProps) {
           <div>
             <div className="trow">
               <span>兵种解锁</span>
-              <span className="n">{user.troopMaxUnlocked}/{TROOP_LEVEL_MAX}</span>
+              <span className="n">{troopMaxUnlocked}/{TROOP_LEVEL_MAX}</span>
             </div>
             <div className="bar">
-              <i style={{ width: `${Math.round((user.troopMaxUnlocked / TROOP_LEVEL_MAX) * 100)}%` }} />
+              <i style={{ width: `${Math.round((troopMaxUnlocked / TROOP_LEVEL_MAX) * 100)}%` }} />
             </div>
             <div className="trow sub">
               <span>{troopFull ? '全部兵种已解锁' : `下一档：${nextTroopName} Lv.${unlockNext}`}</span>
@@ -171,7 +173,7 @@ export function LeftColumn({ user, token, onUserUpdate }: LeftColumnProps) {
             type="button"
             className="prog-btn"
             disabled={busy !== null || troopFull || rare < troopUnlockCost(unlockNext)}
-            onClick={() => run('troop', () => apiTroopUnlock(token, unlockNext), '兵种解锁成功')}
+            onClick={() => run('troop', () => unlockTroop(userId, unlockNext), '兵种解锁成功')}
           >
             {troopFull ? '已全部解锁' : `解锁 ${troopUnlockCost(unlockNext)}稀有`}
           </button>

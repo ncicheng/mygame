@@ -1,32 +1,73 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ActionPoints, BattleReport, UserProfile, WorldArmy, WorldStateResponse } from '@mygame/shared';
-import { apiBattleReports, apiCancelMarch, apiMarch, apiWorld } from './api';
-import { createRealtimeSocket } from './realtime';
+import type {
+  BattleReport,
+  CombatSideInput,
+  General,
+  Resources,
+  WorldArmy,
+  WorldMarch,
+  WorldStateResponse,
+} from '@mygame/shared';
+import { INITIAL_TROOP_UNLOCK, MARCH_TILE_MS } from '@mygame/shared';
+import type { AuthUser } from './auth';
+import {
+  cancelMarch,
+  fetchGeneral,
+  fetchReports,
+  fetchResources,
+  fetchTroopMaxUnlocked,
+  fetchWorld,
+} from './data';
+import { computeMarchPosition, issueMarch, settleBattle } from './game';
 import { ActionDeck } from './ActionDeck';
 import { BattleOverlay } from './BattleOverlay';
+import { CopyrightFooter } from './CopyrightFooter';
 import { LeftColumn } from './LeftColumn';
 import { MapBoard, describeCell, type MapCell } from './MapBoard';
 import { RecruitModal } from './RecruitModal';
 import { RightColumn } from './RightColumn';
 import './world.css';
 
-/** 服务器 WS 推送的行军位置增量 */
-interface MarchUpdate {
-  generalId: string;
-  x: number;
-  y: number;
-}
-
 interface WorldViewProps {
-  user: UserProfile;
-  token: string;
+  user: AuthUser;
   onLogout(): void;
-  /** 招募等业务更新档案后提升到 App 状态（资源卡/部队编成卡实时刷新） */
-  onUserUpdate(user: UserProfile): void;
 }
 
-/** 登录后主界面：变体 C「运筹帷幄」桌游指挥台布局 */
-export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProps) {
+/**
+ * 轮询刷新时保留我方进行中行军的本地插值位置，避免用落库坐标（仍为起点）
+ * 整包覆盖导致部队回弹。仅当新状态里该部队仍为 active 行军时才沿用旧插值，
+ * 否则（行军已到达/取消）交由数据库坐标纠正。
+ */
+function mergeActiveMarchPositions(
+  next: WorldStateResponse,
+  prev: WorldStateResponse | null,
+): WorldStateResponse {
+  if (!prev) {
+    return next;
+  }
+  const marching = new Map<string, { x: number; y: number }>();
+  for (const a of prev.armies) {
+    if (a.side === 'me' && a.march?.status === 'active') {
+      marching.set(a.id, { x: a.x, y: a.y });
+    }
+  }
+  if (marching.size === 0) {
+    return next;
+  }
+  return {
+    ...next,
+    armies: next.armies.map((a) =>
+      a.march?.status === 'active' && marching.has(a.id)
+        ? { ...a, x: marching.get(a.id)!.x, y: marching.get(a.id)!.y }
+        : a,
+    ),
+  };
+}
+
+/** 登录后主界面：变体 C「运筹帷幄」桌游指挥台布局。
+ * 全部数据来自 data.ts（Supabase），行军位置本地 computeMarchPosition 插值渲染，
+ * 以 setInterval 轮询 fetchWorld 刷新到达/资源/战报。 */
+export function WorldView({ user, onLogout }: WorldViewProps) {
   const [world, setWorld] = useState<WorldStateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<MapCell | null>(null);
@@ -39,137 +80,183 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
   const [marching, setMarching] = useState(false);
   const [reports, setReports] = useState<BattleReport[]>([]);
   const [activeReport, setActiveReport] = useState<BattleReport | null>(null);
+  // 玩家自身数据（武将/资源/兵种解锁/战报）
+  const [general, setGeneral] = useState<General | null>(null);
+  const [resources, setResources] = useState<Resources | null>(null);
+  const [troopMax, setTroopMax] = useState<number>(INITIAL_TROOP_UNLOCK);
+  const worldRef = useRef<WorldStateResponse | null>(null);
   const pendingBattleRef = useRef(false);
   const lastAutoReportRef = useRef<string | null>(null);
+  // 已处理（结算/刷新）的行军 id，避免到达后重复触发
+  const processedMarchRef = useRef<Set<string>>(new Set());
 
-  // 首次加载世界
-  useEffect(() => {
-    let cancelled = false;
-    setError(null);
-    setWorld(null);
-    apiWorld(token)
-      .then((w) => {
-        if (cancelled) {
-          return;
-        }
-        setWorld(w);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) {
-          return;
-        }
-        setError(err instanceof Error ? err.message : String(err));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
+  // 世界状态与玩家数据（各取所需，任一失败不拖累整体）
+  const refreshAll = useCallback(
+    async (showError: boolean) => {
+      const [w, gen, res, max, rep] = await Promise.allSettled([
+        fetchWorld(user.id),
+        fetchGeneral(user.id),
+        fetchResources(user.id),
+        fetchTroopMaxUnlocked(user.id),
+        fetchReports(user.id),
+      ]);
+      if (w.status === 'fulfilled') {
+        setWorld((prev) => mergeActiveMarchPositions(w.value, prev));
+      } else if (showError) {
+        setError(w.reason instanceof Error ? w.reason.message : String(w.reason));
+      }
+      if (gen.status === 'fulfilled') setGeneral(gen.value);
+      if (res.status === 'fulfilled') setResources(res.value);
+      if (max.status === 'fulfilled') setTroopMax(max.value);
+      if (rep.status === 'fulfilled') setReports(rep.value);
+    },
+    [user.id],
+  );
 
-  // 实时渲染：订阅服务器世界时钟推送的行军位置，逐格移动。
-  // 连接时携带 token，服务端据此把 socket 归入其所在世界的房间（只收本世界推送）。
-  // 连接地址与 fetch 同用 API_BASE；每次渲染/重挂载创建全新 socket 实例，
-  // 避免 StrictMode 下复用已被 disconnect 且无法重连的缓存实例。
+  // 首次加载 + 周期轮询：到达/资源/战报落到界面
   useEffect(() => {
-    const socket = createRealtimeSocket(token);
-    socket.on('march:update', (updates: MarchUpdate[]) => {
+    void refreshAll(true);
+    const poll = setInterval(() => void refreshAll(false), 2000);
+    return () => clearInterval(poll);
+  }, [refreshAll]);
+
+  // 行军到达的本地结算：打野行军到达 → settleBattle，普通行军 → 刷新落库位置
+  const settleArrivedBattle = useCallback(
+    async (generalId: string, march: WorldMarch) => {
+      const cur = worldRef.current;
+      if (!cur) {
+        return;
+      }
+      const wildland = cur.wildlands.find((wl) => wl.x === march.targetX && wl.y === march.targetY);
+      if (!wildland) {
+        await refreshAll(false);
+        return;
+      }
+      try {
+        // 野地守军：power/count 均取 strength（复刻旧后端 battle.ts 语义）
+        const defender: CombatSideInput = {
+          generalLevel: 1,
+          generalStars: 1,
+          weaponTier: null,
+          army: [{ soldierLevel: 1, count: wildland.strength }],
+        };
+        await settleBattle(user.id, generalId, defender, {
+          worldId: cur.world.id,
+          wildlandId: wildland.id,
+          wildlandName: wildland.name,
+          marchId: march.id,
+          targetX: march.targetX,
+          targetY: march.targetY,
+        });
+        await refreshAll(false);
+        // 结算后自动打开最新战报（回放）
+        const rep = await fetchReports(user.id);
+        setReports(rep);
+        const newest = rep[0];
+        if (newest && newest.id !== lastAutoReportRef.current) {
+          lastAutoReportRef.current = newest.id;
+          setActiveReport(newest);
+        }
+      } catch (err) {
+        setMarchErr(err instanceof Error ? err.message : String(err));
+        await refreshAll(false);
+      }
+    },
+    [user.id, refreshAll],
+  );
+
+  // 行军本地插值渲染 + 到达检测
+  useEffect(() => {
+    const id = setInterval(() => {
+      const now = Date.now();
+      // 我方行军按出发时刻逐格推进
       setWorld((w) => {
         if (!w) {
           return w;
         }
-        const byId = new Map(updates.map((u) => [u.generalId, u]));
         return {
           ...w,
-          armies: w.armies.map((a) => {
-            const u = byId.get(a.id);
-            return u ? { ...a, x: u.x, y: u.y } : a;
-          }),
+          armies: w.armies.map((a) =>
+            a.side === 'me' && a.march?.status === 'active'
+              ? { ...a, x: computeMarchPosition(a.march, now).x, y: computeMarchPosition(a.march, now).y }
+              : a,
+          ),
         };
       });
-    });
-    return () => {
-      socket.disconnect();
-    };
-  }, [token]);
-
-  // 同步结算：存在行军时周期性刷新，让到达（行军信息清除）与取消能落到界面
-  useEffect(() => {
-    const hasMarch = world?.armies.some((a) => a.march !== null) ?? false;
-    if (!hasMarch) {
-      return;
-    }
-    const id = setInterval(async () => {
-      try {
-        setWorld(await apiWorld(token));
-      } catch {
-        // 同步失败静默，下一轮再试
-      }
-    }, 2000);
-    return () => clearInterval(id);
-  }, [world, token]);
-
-  // 战报轮询：刷新战报卡；刚发起打野后，若出现新战报则自动打开战斗回放
-  useEffect(() => {
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const res = await apiBattleReports(token);
-        if (cancelled) {
-          return;
+      // 到达处理（用 worldRef 当前已提交值）
+      const cur = worldRef.current;
+      for (const army of cur?.armies ?? []) {
+        const m = army.march;
+        if (!m || m.status !== 'active') {
+          continue;
         }
-        setReports(res.reports);
-        const newest = res.reports[0];
-        if (newest && newest.id !== lastAutoReportRef.current && pendingBattleRef.current) {
-          lastAutoReportRef.current = newest.id;
+        if (now < new Date(m.arrivesAt).getTime()) {
+          continue;
+        }
+        if (processedMarchRef.current.has(m.id)) {
+          continue;
+        }
+        processedMarchRef.current.add(m.id);
+        if (pendingBattleRef.current) {
           pendingBattleRef.current = false;
-          setActiveReport(newest);
+          void settleArrivedBattle(army.id, m);
+        } else {
+          void refreshAll(false);
         }
-      } catch {
-        // 拉取失败静默，下一轮再试
       }
-    };
-    void poll();
-    const id = setInterval(poll, 3000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [token]);
+    }, 500);
+    return () => clearInterval(id);
+  }, [settleArrivedBattle, refreshAll]);
 
-  const issueMarch = useCallback(
+  // 世界状态同步到 ref（间隔内读取当前值）
+  useEffect(() => {
+    worldRef.current = world;
+  }, [world]);
+
+  const handleIssueMarch = useCallback(
     async (target: MapCell, attack: boolean) => {
       if (!marchArmyId || marching) {
         return;
       }
-      const generalId = marchArmyId;
+      const army = worldRef.current?.armies.find((a) => a.id === marchArmyId);
+      const worldNow = worldRef.current;
+      if (!army || !worldNow) {
+        setMarchErr('未找到所选部队');
+        return;
+      }
+      const generalId = army.id;
       setMarching(true);
       try {
-        const res = await apiMarch(token, { generalId, targetX: target.x, targetY: target.y });
+        const distance = Math.abs(target.x - army.x) + Math.abs(target.y - army.y);
+        const departedAt = new Date().toISOString();
+        const arrivesAt = new Date(Date.now() + distance * MARCH_TILE_MS).toISOString();
+        const march = await issueMarch(user.id, generalId, target.x, target.y, {
+          worldId: worldNow.world.id,
+          originX: army.x,
+          originY: army.y,
+          departedAt,
+          arrivesAt,
+        });
         if (attack) {
-          // 打野行军：到达后触发战斗，预期会产生新战报 → 标记以便自动打开回放
+          // 打野行军：到达后本地结算战斗，预期产生新战报 → 标记以便自动打开回放
           pendingBattleRef.current = true;
         }
-        setWorld((w) => {
-          if (!w) {
-            return w;
-          }
-          return {
-            ...w,
-            actionPoints: res.actionPoints,
-            armies: w.armies.map((a) => (a.id === generalId ? { ...a, march: res.march } : a)),
-          };
-        });
+        // 落位行军，交由插值渲染
+        setWorld((w) =>
+          w ? { ...w, armies: w.armies.map((a) => (a.id === generalId ? { ...a, march } : a)) } : w,
+        );
         setMarchMode(false);
         setBanditMode(false);
         setMarchArmyId(null);
         setMarchMsg(`「${target.x},${target.y}」${attack ? '打野出征' : '行军'}已发布`);
         setMarchErr(null);
-      } catch (err: unknown) {
+      } catch (err) {
         setMarchErr(err instanceof Error ? err.message : String(err));
       } finally {
         setMarching(false);
       }
     },
-    [marchArmyId, token, marching],
+    [marchArmyId, user.id, marching],
   );
 
   const handleCellClick = useCallback(
@@ -179,13 +266,13 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
           setMarchErr('请选择野地（山贼营地）目标格发起攻打');
           return;
         }
-        void issueMarch(cell, banditMode);
+        void handleIssueMarch(cell, banditMode);
         return;
       }
       setSelected(cell);
       setMarchErr(null);
     },
-    [marchMode, banditMode, marchArmyId, issueMarch],
+    [marchMode, banditMode, marchArmyId, handleIssueMarch],
   );
 
   const handleArmyClick = useCallback(
@@ -193,7 +280,11 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
       setSelected(null);
       if (marchMode || banditMode) {
         setMarchArmyId(army.id);
-        setMarchMsg(banditMode ? `已选择「${army.generalName}」，点击野地目标攻打` : `已选择「${army.generalName}」，点击地图目标格下达行军`);
+        setMarchMsg(
+          banditMode
+            ? `已选择「${army.generalName}」，点击野地目标攻打`
+            : `已选择「${army.generalName}」，点击地图目标格下达行军`,
+        );
         setMarchErr(null);
       } else {
         setMarchMsg(`已选中「${army.generalName}」，可查看行军或先出征`);
@@ -204,41 +295,25 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
 
   const handleCancelMarch = useCallback(
     async (marchId: string) => {
-      if (!world) {
-        return;
-      }
       try {
-        const res = await apiCancelMarch(token, marchId);
-        setWorld((w) => {
-          if (!w) {
-            return w;
-          }
-          return {
-            ...w,
-            actionPoints: res.actionPoints,
-            armies: w.armies.map((a) => (a.march?.id === marchId ? { ...a, march: null, x: res.march.originX, y: res.march.originY } : a)),
-          };
-        });
+        await cancelMarch(user.id, marchId);
+        await refreshAll(false);
         setMarchMsg('行军已取消，部队返回起点');
         setMarchErr(null);
-      } catch (err: unknown) {
+      } catch (err) {
         setMarchErr(err instanceof Error ? err.message : String(err));
       }
     },
-    [token, world],
+    [user.id, refreshAll],
   );
 
   // 选中格上行军中的我方部队（用于展示到达时间与取消按钮）
   const selectedMarchArmy = selected?.markers.find((m) => m.army?.march)?.army ?? null;
 
-  // 招募成功：档案提升到 App，行动点就地刷新（不重新拉取世界）
-  const handleRecruited = useCallback(
-    (updatedUser: UserProfile, actionPoints: ActionPoints) => {
-      onUserUpdate(updatedUser);
-      setWorld((w) => (w ? { ...w, actionPoints } : w));
-    },
-    [onUserUpdate],
-  );
+  // 招募/养成成功：刷新世界与玩家数据
+  const handleChanged = useCallback(() => {
+    void refreshAll(false);
+  }, [refreshAll]);
 
   if (error || !world) {
     return (
@@ -256,9 +331,9 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
   return (
     <div className="vc">
       <header className="vc-top">
-        <h1>⚔ MyGame 指挥台</h1>
+        <h1 className="mg-title">⚔ MyGame 指挥台</h1>
         <span className="pl">
-          {user.username} · Lv.{user.generals[0]?.level ?? 1}
+          {user.email ?? user.id} · Lv.{general?.level ?? 1}
         </span>
         <span className="ap">
           行动点 {world.actionPoints.current}/{world.actionPoints.max}
@@ -269,7 +344,13 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
       </header>
       <div className="vc-main">
         <aside className="col">
-          <LeftColumn user={user} token={token} onUserUpdate={onUserUpdate} />
+          <LeftColumn
+            userId={user.id}
+            general={general}
+            rare={resources?.rare ?? 0}
+            troopMaxUnlocked={troopMax}
+            onChanged={handleChanged}
+          />
         </aside>
         <section className="boardwrap">
           <MapBoard
@@ -281,9 +362,14 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
           <div className="selbar">
             {selectedMarchArmy ? (
               <span className="marchbar">
-                「{selectedMarchArmy.generalName}」行军至 ({selectedMarchArmy.march!.targetX},{selectedMarchArmy.march!.targetY}) ·{' '}
+                「{selectedMarchArmy.generalName}」行军至 ({selectedMarchArmy.march!.targetX},
+                {selectedMarchArmy.march!.targetY}) ·{' '}
                 {new Date(selectedMarchArmy.march!.arrivesAt).toLocaleTimeString()} 到达
-                <button type="button" className="act kind" onClick={() => handleCancelMarch(selectedMarchArmy.march!.id)}>
+                <button
+                  type="button"
+                  className="act kind"
+                  onClick={() => handleCancelMarch(selectedMarchArmy.march!.id)}
+                >
                   取消行军
                 </button>
               </span>
@@ -300,7 +386,7 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
           {marchErr && <div className="march-err">{marchErr}</div>}
         </section>
         <aside className="col">
-          <RightColumn user={user} world={world} reports={reports} onOpenReport={setActiveReport} />
+          <RightColumn resources={resources} world={world} reports={reports} onOpenReport={setActiveReport} />
         </aside>
       </div>
       <footer className="vc-bottom">
@@ -323,13 +409,16 @@ export function WorldView({ user, token, onLogout, onUserUpdate }: WorldViewProp
           banditMode={banditMode}
         />
       </footer>
+      <CopyrightFooter />
       {recruiting && (
         <RecruitModal
-          user={user}
-          token={token}
+          userId={user.id}
+          general={general}
+          resources={resources}
+          troopMaxUnlocked={troopMax}
           ap={world.actionPoints.current}
           onClose={() => setRecruiting(false)}
-          onRecruited={handleRecruited}
+          onRecruited={handleChanged}
         />
       )}
       {activeReport && <BattleOverlay report={activeReport} onClose={() => setActiveReport(null)} />}

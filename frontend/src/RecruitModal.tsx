@@ -3,25 +3,26 @@ import {
   ACTION_COSTS,
   TROOP_CATALOG,
   getTroopType,
-  type ActionPoints,
+  type General,
   type Resources,
-  type UserProfile,
 } from '@mygame/shared';
-import { apiRecruit } from './api';
+import { recruitTroop } from './game';
 
 interface RecruitModalProps {
-  user: UserProfile;
-  token: string;
+  userId: string;
+  general: General | null;
+  resources: Resources | null;
+  /** 已解锁的最高兵种等级 */
+  troopMaxUnlocked: number;
   /** 当前行动点（不足 1 点时全部兵种置灰） */
   ap: number;
   onClose(): void;
-  /** 招募成功：返回更新后的档案与行动点，由上层刷新卡片 */
-  onRecruited(user: UserProfile, actionPoints: ActionPoints): void;
+  /** 招募成功：由上层刷新世界与玩家数据 */
+  onRecruited(): void;
 }
 
 /** 招募弹窗：兵种表 + 数量步进 + 单兵成本 + 部队现有数量，逐行可招募 */
-export function RecruitModal({ user, token, ap, onClose, onRecruited }: RecruitModalProps) {
-  const general = user.generals[0];
+export function RecruitModal({ userId, general, resources, troopMaxUnlocked, ap, onClose, onRecruited }: RecruitModalProps) {
   const [count, setCount] = useState(1);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -33,8 +34,8 @@ export function RecruitModal({ user, token, ap, onClose, onRecruited }: RecruitM
     setBusy(true);
     setMessage(null);
     try {
-      const res = await apiRecruit(token, { generalId: general.id, soldierLevel, count });
-      onRecruited(res.user, res.actionPoints);
+      await recruitTroop(userId, general.id, soldierLevel, count);
+      onRecruited();
       setMessage(`已招募 ${count} 名 ${getTroopType(soldierLevel)?.name ?? '兵卒'}`);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : String(err));
@@ -43,7 +44,8 @@ export function RecruitModal({ user, token, ap, onClose, onRecruited }: RecruitM
     }
   };
 
-  const { food, iron, gold } = user.resources;
+  const res = resources ?? { food: 0, iron: 0, rare: 0, gold: 0 };
+  const { food, iron, gold } = res;
 
   return (
     <div className="modal-mask" onClick={onClose}>
@@ -81,7 +83,7 @@ export function RecruitModal({ user, token, ap, onClose, onRecruited }: RecruitM
           </thead>
           <tbody>
             {TROOP_CATALOG.map((t) => {
-              const locked = t.level > user.troopMaxUnlocked;
+              const locked = t.level > troopMaxUnlocked;
               const owned = general?.army.find((u) => u.soldierLevel === t.level)?.count ?? 0;
               const totalCost: Resources = {
                 food: t.cost.food * count,
