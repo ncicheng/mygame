@@ -8,6 +8,7 @@ import {
   fetchArmyUnits,
   createMarch,
   cancelMarch,
+  finalizeMarch,
   saveBattleResult,
   unlockTroop,
   levelUpGeneral,
@@ -254,13 +255,27 @@ test('createMarch 拒绝指挥他人武将（归属校验）', async () => {
 });
 
 test('cancelMarch 把行军置为 cancelled', async () => {
+   const { client, callsOf } = makeFakeSupabase({
+     marches: [{ id: 'm1', status: 'active' }],
+   });
+   await cancelMarch(USER, 'm1', client);
+   const upd = callsOf('marches').find((c) => c.method === 'update');
+   assert.ok(upd, '应调用 marches.update');
+   assert.equal((upd!.args[0] as object).status, 'cancelled');
+ });
+
+test('finalizeMarch 把武将落位到目标格并把行军置为 arrived', async () => {
   const { client, callsOf } = makeFakeSupabase({
+    generals: [{ id: GEN, user_id: USER, x: 0, y: 0 }],
     marches: [{ id: 'm1', status: 'active' }],
   });
-  await cancelMarch(USER, 'm1', client);
-  const upd = callsOf('marches').find((c) => c.method === 'update');
-  assert.ok(upd, '应调用 marches.update');
-  assert.equal((upd!.args[0] as object).status, 'cancelled');
+  await finalizeMarch(USER, GEN, 'm1', 5, 3, client);
+  const genUpd = callsOf('generals').find((c) => c.method === 'update');
+  assert.ok(genUpd, '应更新 generals');
+  assert.deepEqual((genUpd!.args[0] as object), { x: 5, y: 3 });
+  const mUpd = callsOf('marches').find((c) => c.method === 'update');
+  assert.ok(mUpd, '应更新 marches');
+  assert.equal((mUpd!.args[0] as object).status, 'arrived');
 });
 
 test('saveBattleResult 按序写战报并结算胜利（资源/野地/武将/行军）', async () => {

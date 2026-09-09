@@ -473,6 +473,34 @@ export async function cancelMarch(
   if (!data) throw new Error('行军不存在或已结束');
 }
 
+/**
+ * 结算一次纯移动（无战斗）行军的到达：把武将落位到目标格，并把该行军置为 arrived。
+ * 若只刷新而不落库，行军的 status 会一直停在 active，部分唯一索引
+ * marches_general_id_active_unique 会挡住后续新行军（duplicate key）。
+ */
+export async function finalizeMarch(
+  userId: string,
+  generalId: string,
+  marchId: string,
+  targetX: number,
+  targetY: number,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error: genErr } = await client
+    .from('generals')
+    .update({ x: targetX, y: targetY })
+    .eq('id', generalId)
+    .eq('user_id', userId);
+  if (genErr) throw new Error(`行军到达落位失败：${genErr.message}`);
+  const { error: mErr } = await client
+    .from('marches')
+    .update({ status: 'arrived' })
+    .eq('id', marchId)
+    .eq('user_id', userId)
+    .eq('status', 'active');
+  if (mErr) throw new Error(`行军结束失败：${mErr.message}`);
+}
+
 /** 一场打野战斗的结算入参：战场上下文 + 战前部队（用于按胜负战损落库）。 */
 export interface BattleSettlement {
   worldId: string;

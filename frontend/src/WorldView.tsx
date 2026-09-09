@@ -17,6 +17,7 @@ import {
   fetchResources,
   fetchTroopMaxUnlocked,
   fetchWorld,
+  finalizeMarch,
 } from './data';
 import { computeMarchPosition, issueMarch, settleBattle } from './game';
 import { ActionDeck } from './ActionDeck';
@@ -129,7 +130,15 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
       }
       const wildland = cur.wildlands.find((wl) => wl.x === march.targetX && wl.y === march.targetY);
       if (!wildland) {
-        await refreshAll(false);
+        // 纯移动行军到达：把武将落位到目标格并把行军置为 arrived，否则行军卡在
+        // active，唯一索引会挡住后续新行军（duplicate key）。
+        try {
+          await finalizeMarch(user.id, generalId, march.id, march.targetX, march.targetY);
+          await refreshAll(false);
+        } catch (err) {
+          setMarchErr(err instanceof Error ? err.message : String(err));
+          await refreshAll(false);
+        }
         return;
       }
       try {
