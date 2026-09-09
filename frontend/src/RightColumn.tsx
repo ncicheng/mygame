@@ -1,16 +1,16 @@
-import type { BattleReport, Resources, WorldStateResponse } from '@mygame/shared';
+import type { BattleReport, Resources } from '@mygame/shared';
+import type { QuestState } from './quests';
 
 interface RightColumnProps {
   resources: Resources | null;
-  world: WorldStateResponse;
   reports: BattleReport[];
+  quests: QuestState;
   /** 点击某条战报时打开战斗回放 */
   onOpenReport(report: BattleReport): void;
 }
 
 /** 右卡片栏：资源卡 + 战报卡 + 任务卡 + 军团卡 */
-export function RightColumn({ resources, world, reports, onOpenReport }: RightColumnProps) {
-  const myCities = world.cities.filter((c) => c.side === 'me').length;
+export function RightColumn({ resources, reports, quests, onOpenReport }: RightColumnProps) {
   const res = resources ?? { food: 0, iron: 0, rare: 0, gold: 0 };
   return (
     <>
@@ -46,13 +46,28 @@ export function RightColumn({ resources, world, reports, onOpenReport }: RightCo
 
       <section className="card">
         <h4>🏆 任务</h4>
-        <div className="trow"><span>暂无任务</span></div>
+        {quests.allDone ? (
+          <div className="trow"><span>🏆 成就达成</span></div>
+        ) : (
+          <>
+            {quests.current && (
+              <div className="trow">
+                <span>当前目标：{quests.current.title}</span>
+                <span className="hint">{quests.current.hint}</span>
+              </div>
+            )}
+            {quests.quests.map((q) => (
+              <div className="trow" key={q.id}>
+                <span>{q.done ? '✅' : '○'} {q.title}</span>
+              </div>
+            ))}
+          </>
+        )}
       </section>
 
       <section className="card">
         <h4>⛳ 军团</h4>
-        <div className="trow"><span>我方城池</span><span className="n">{myCities}</span></div>
-        <div className="trow"><span>军团成员</span><span className="n">—</span></div>
+        <div className="trow"><span>敬请期待（后续迭代）</span></div>
       </section>
     </>
   );
