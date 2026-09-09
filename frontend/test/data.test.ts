@@ -17,6 +17,12 @@ import {
   updateResources,
   addArmyUnit,
   spendActionPoints,
+  fetchGuilds,
+  fetchMyGuild,
+  fetchGuildMembers,
+  createGuild,
+  joinGuild,
+  leaveGuild,
 } from '../src/data.js';
 import type { CombatResult, CombatUnit } from '@mygame/shared';
 
@@ -445,4 +451,91 @@ test('spendActionPoints 足额则扣减，不足抛中文 Error', async () => {
     action_points: { current: 1, max: 5, last_recovered_at: new Date().toISOString() },
   });
   await assert.rejects(() => spendActionPoints(USER, 2, poor.client), /行动点不足/);
+});
+
+test('createGuild 插入 guilds 并让创建者加入 guild_members', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    guilds: { data: null, error: null },
+    guild_members: { data: null, error: null },
+  });
+  const g = await createGuild(USER, '铁血', client);
+
+  const gIns = callsOf('guilds').find((c) => c.method === 'insert');
+  assert.ok(gIns, '应调用 guilds.insert');
+  const gRow = gIns!.args[0] as Record<string, unknown>;
+  assert.equal(gRow.name, '铁血');
+  assert.equal(gRow.leader_user_id, USER);
+  assert.ok(gRow.created_at, '创建时应写入 created_at');
+
+  const mIns = callsOf('guild_members').find((c) => c.method === 'insert');
+  assert.ok(mIns, '应调用 guild_members.insert');
+  assert.deepEqual(mIns!.args[0], { guild_id: g.id, user_id: USER });
+
+  assert.equal(g.name, '铁血');
+  assert.equal(g.leaderUserId, USER);
+});
+
+test('joinGuild 插入本人 guild_members 行', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    guild_members: { data: null, error: null },
+  });
+  await joinGuild(USER, 'g1', client);
+  const ins = callsOf('guild_members').find((c) => c.method === 'insert');
+  assert.ok(ins, '应调用 guild_members.insert');
+  assert.deepEqual(ins!.args[0], { guild_id: 'g1', user_id: USER });
+});
+
+test('leaveGuild 删除本人 guild_members 行', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    guild_members: { data: null, error: null },
+  });
+  await leaveGuild(USER, 'g1', client);
+  const del = callsOf('guild_members').find((c) => c.method === 'delete');
+  assert.ok(del, '应调用 guild_members.delete');
+  assert.ok(callsOf('guild_members').some((c) => c.method === 'eq' && c.args[0] === 'guild_id' && c.args[1] === 'g1'));
+  assert.ok(callsOf('guild_members').some((c) => c.method === 'eq' && c.args[0] === 'user_id' && c.args[1] === USER));
+});
+
+test('fetchMyGuild 通过 guild_members 反查 guild', async () => {
+  const { client } = makeFakeSupabase({
+    guild_members: [{ guild_id: 'g1' }],
+    guilds: [{ id: 'g1', name: '铁血', leader_user_id: USER, created_at: '2020-01-01T00:00:00Z' }],
+  });
+  const g = await fetchMyGuild(USER, client);
+  assert.equal(g!.id, 'g1');
+  assert.equal(g!.name, '铁血');
+  assert.equal(g!.leaderUserId, USER);
+  assert.equal(g!.createdAt, '2020-01-01T00:00:00.000Z');
+});
+
+test('fetchMyGuild 无成员关系时返回 null', async () => {
+  const { client } = makeFakeSupabase({
+    guild_members: [],
+  });
+  assert.equal(await fetchMyGuild(USER, client), null);
+});
+
+test('fetchGuilds 列出全部军团', async () => {
+  const { client } = makeFakeSupabase({
+    guilds: [
+      { id: 'g1', name: '铁血', leader_user_id: USER, created_at: '2020-01-01T00:00:00Z' },
+      { id: 'g2', name: '兄弟会', leader_user_id: 'u2', created_at: '2020-01-02T00:00:00Z' },
+    ],
+  });
+  const list = await fetchGuilds(client);
+  assert.equal(list.length, 2);
+  assert.deepEqual(list[0], { id: 'g1', name: '铁血', leaderUserId: USER, createdAt: '2020-01-01T00:00:00.000Z' });
+  assert.equal(list[1].name, '兄弟会');
+});
+
+test('fetchGuildMembers 列出军团成员', async () => {
+  const { client } = makeFakeSupabase({
+    guild_members: [
+      { guild_id: 'g1', user_id: USER, joined_at: '2020-01-01T00:00:00Z' },
+      { guild_id: 'g1', user_id: 'u2', joined_at: '2020-01-02T00:00:00Z' },
+    ],
+  });
+  const list = await fetchGuildMembers('g1', client);
+  assert.equal(list.length, 2);
+  assert.deepEqual(list[0], { guildId: 'g1', userId: USER, joinedAt: '2020-01-01T00:00:00.000Z' });
 });
