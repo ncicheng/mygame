@@ -771,8 +771,8 @@ CREATE POLICY pvp_battle_reports_select ON pvp_battle_reports
 -- 公式镜像 shared/src/combat.ts：
 --   generalMultiplier(level, stars) = 1 + (level-1)*0.05 + (stars-1)*0.10
 --   armyPower = SUM(count × troop_stats.power)
---   effectiveWeaponTier = min(weaponTier, maxSoldierLevel)（无兵/无武器为 0）
---   generalSidePower = generalMultiplier × armyPower + effectiveWeaponTier*50
+--   weaponBonus = weaponTier × 50（无武器为 0，用原始 tier 而非封顶值）
+--   generalSidePower = generalMultiplier × armyPower + weaponBonus
 --   winProbability = 1/(1+exp(-slope*ln(attacker/defender))), slope=2.0
 --   胜方轻损 15%、败方重损 70%（战损 = floor(count×rate)）
 -- 胜负判定：完全均势 → 平局；否则用「双方 id + 挑战 id」哈希做确定性种子，
@@ -803,12 +803,8 @@ DECLARE
   -- 战力计算
   v_ch_army numeric;
   v_tg_army numeric;
-  v_ch_max_level integer;
-  v_tg_max_level integer;
   v_ch_weapon_tier integer;
   v_tg_weapon_tier integer;
-  v_ch_weapon_eff integer;
-  v_tg_weapon_eff integer;
   v_ch_mult numeric;
   v_tg_mult numeric;
   v_ch_power numeric;
@@ -875,16 +871,14 @@ BEGIN
     RETURNING id INTO v_challenge_id;
   END IF;
 
-  -- 3. 战力：armyPower = SUM(count × troop_stats.power) + maxSoldierLevel
-  SELECT COALESCE(SUM(u.count * COALESCE(ts.power, 0)), 0),
-         COALESCE(MAX(u.soldier_level), 0)
-    INTO v_ch_army, v_ch_max_level
+  -- 3. 战力：armyPower = SUM(count × troop_stats.power)
+  SELECT COALESCE(SUM(u.count * COALESCE(ts.power, 0)), 0)
+    INTO v_ch_army
     FROM army_units u
     LEFT JOIN troop_stats ts ON ts.soldier_level = u.soldier_level
    WHERE u.general_id = p_challenger_general_id;
-  SELECT COALESCE(SUM(u.count * COALESCE(ts.power, 0)), 0),
-         COALESCE(MAX(u.soldier_level), 0)
-    INTO v_tg_army, v_tg_max_level
+  SELECT COALESCE(SUM(u.count * COALESCE(ts.power, 0)), 0)
+    INTO v_tg_army
     FROM army_units u
     LEFT JOIN troop_stats ts ON ts.soldier_level = u.soldier_level
    WHERE u.general_id = p_target_general_id;
@@ -893,21 +887,13 @@ BEGIN
   SELECT tier INTO v_ch_weapon_tier FROM weapons WHERE id = v_ch_weapon_id;
   SELECT tier INTO v_tg_weapon_tier FROM weapons WHERE id = v_tg_weapon_id;
 
-  -- effectiveWeaponTier = min(tier, maxSoldierLevel)，无兵或无武器为 0
-  v_ch_weapon_eff := CASE
-    WHEN v_ch_weapon_tier IS NOT NULL AND v_ch_max_level > 0 THEN LEAST(v_ch_weapon_tier, v_ch_max_level)
-    ELSE 0 END;
-  v_tg_weapon_eff := CASE
-    WHEN v_tg_weapon_tier IS NOT NULL AND v_tg_max_level > 0 THEN LEAST(v_tg_weapon_tier, v_tg_max_level)
-    ELSE 0 END;
-
   -- generalMultiplier = 1 + (level-1)*0.05 + (stars-1)*0.10
   v_ch_mult := 1 + (v_ch_level - 1) * 0.05 + (v_ch_stars - 1) * 0.10;
   v_tg_mult := 1 + (v_tg_level - 1) * 0.05 + (v_tg_stars - 1) * 0.10;
 
-  -- generalSidePower = multiplier × armyPower + weaponBonus（每阶 +50）
-  v_ch_power := v_ch_mult * v_ch_army + v_ch_weapon_eff * 50;
-  v_tg_power := v_tg_mult * v_tg_army + v_tg_weapon_eff * 50;
+  -- generalSidePower = multiplier × armyPower + weaponBonus（每阶 +50，用原始 tier）
+  v_ch_power := v_ch_mult * v_ch_army + COALESCE(v_ch_weapon_tier, 0) * 50;
+  v_tg_power := v_tg_mult * v_tg_army + COALESCE(v_tg_weapon_tier, 0) * 50;
 
   -- 4. 胜率：winProbability（logistic，slope=2.0；含 combat.ts 边界情况）
   IF v_tg_power <= 0 THEN
