@@ -211,7 +211,9 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
           pendingBattleRef.current = false;
           void settleArrivedBattle(army.id, m);
         } else {
-          void refreshAll(false);
+          // 纯移动行军到达也走 settleArrivedBattle：内部无野地时 finalizeMarch 落位并置 arrived，
+          // 否则行军卡在 active，唯一索引会挡住后续新行军。
+          void settleArrivedBattle(army.id, m);
         }
       }
     }, 500);
