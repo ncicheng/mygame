@@ -657,7 +657,8 @@ ALTER TABLE guild_members ENABLE ROW LEVEL SECURITY;
 
 -- guilds：登录用户可读全部；创建任意登录用户；改名/解散仅 leader
 CREATE POLICY guilds_select ON guilds FOR SELECT USING (auth.uid() IS NOT NULL);
-CREATE POLICY guilds_insert ON guilds FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY guilds_insert ON guilds
+  FOR INSERT WITH CHECK (auth.uid() = leader_user_id);
 CREATE POLICY guilds_update ON guilds
   FOR UPDATE USING (auth.uid() = leader_user_id) WITH CHECK (auth.uid() = leader_user_id);
 CREATE POLICY guilds_delete ON guilds

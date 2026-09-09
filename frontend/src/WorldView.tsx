@@ -127,10 +127,15 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
       if (rep.status === 'fulfilled') setReports(rep.value);
       if (myG.status === 'fulfilled') {
         setMyGuild(myG.value);
-        // 已加入军团时加载其成员列表
+        // 已加入军团时加载其成员列表；失败静默（成员列表非关键，避免每 2s
+        // 轮询因 fetchGuildMembers 抛错产生未处理的 Promise rejection）
         if (myG.value) {
-          const mem = await fetchGuildMembers(myG.value.id);
-          setGuildMembers(mem);
+          try {
+            const mem = await fetchGuildMembers(myG.value.id);
+            setGuildMembers(mem);
+          } catch {
+            setGuildMembers([]);
+          }
         } else {
           setGuildMembers([]);
         }
@@ -461,6 +466,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
         </section>
         <aside className="col">
           <RightColumn
+            userId={user.id}
             resources={resources}
             reports={reports}
             quests={computeQuests({

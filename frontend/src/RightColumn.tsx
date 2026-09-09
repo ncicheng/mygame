@@ -4,6 +4,8 @@ import type { QuestState } from './quests';
 import type { Guild, GuildMember } from './data';
 
 interface RightColumnProps {
+  /** 当前玩家 id（用于判定盟主本人 / 控制退出按钮） */
+  userId: string;
   resources: Resources | null;
   reports: BattleReport[];
   quests: QuestState;
@@ -25,6 +27,7 @@ interface RightColumnProps {
 
 /** 右卡片栏：资源卡 + 战报卡 + 任务卡 + 军团卡 */
 export function RightColumn({
+  userId,
   resources,
   reports,
   quests,
@@ -96,7 +99,7 @@ export function RightColumn({
           <>
             <div className="trow">
               <span>军团名：{myGuild.name}</span>
-              {myGuild.leaderUserId && (
+              {myGuild.leaderUserId === userId && (
                 <span className="hint">盟主</span>
               )}
             </div>
@@ -108,15 +111,17 @@ export function RightColumn({
                 <span>{m.userId === myGuild.leaderUserId ? '👑' : '⚔'} {m.userId}</span>
               </div>
             ))}
-            <div className="trow">
-              <button
-                type="button"
-                className="mg-btn ghost"
-                onClick={() => onLeaveGuild(myGuild.id)}
-              >
-                退出军团
-              </button>
-            </div>
+            {myGuild.leaderUserId !== userId && (
+              <div className="trow">
+                <button
+                  type="button"
+                  className="mg-btn ghost"
+                  onClick={() => onLeaveGuild(myGuild.id)}
+                >
+                  退出军团
+                </button>
+              </div>
+            )}
           </>
         ) : (
           <>
