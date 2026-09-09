@@ -634,3 +634,40 @@ CREATE TRIGGER trg_seed_new_user
   AFTER INSERT ON auth.users
   FOR EACH ROW
   EXECUTE FUNCTION seed_new_user();
+
+-- =============================================================
+-- 16. 军团（社交层）：创建/加入/退出，无 PvP 战斗
+-- =============================================================
+CREATE TABLE guilds (
+  id text PRIMARY KEY,
+  name text NOT NULL UNIQUE,
+  leader_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE guild_members (
+  guild_id text NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  joined_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (guild_id, user_id),
+  UNIQUE (user_id)  -- 单军团：一名玩家只属于一个军团
+);
+
+ALTER TABLE guilds ENABLE ROW LEVEL SECURITY;
+ALTER TABLE guild_members ENABLE ROW LEVEL SECURITY;
+
+-- guilds：登录用户可读全部；创建任意登录用户；改名/解散仅 leader
+CREATE POLICY guilds_select ON guilds FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY guilds_insert ON guilds
+  FOR INSERT WITH CHECK (auth.uid() = leader_user_id);
+CREATE POLICY guilds_update ON guilds
+  FOR UPDATE USING (auth.uid() = leader_user_id) WITH CHECK (auth.uid() = leader_user_id);
+CREATE POLICY guilds_delete ON guilds
+  FOR DELETE USING (auth.uid() = leader_user_id);
+
+-- guild_members：登录用户可读全部；加入/退出仅本人
+CREATE POLICY guild_members_select ON guild_members
+  FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY guild_members_insert ON guild_members
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY guild_members_delete ON guild_members
+  FOR DELETE USING (auth.uid() = user_id);

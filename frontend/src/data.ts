@@ -323,6 +323,126 @@ export async function fetchWorld(
 }
 
 // ---------------------------------------------------------------------------
+// 军团
+// ---------------------------------------------------------------------------
+
+/** 军团领域对象。leaderUserId 映射 guilds.leader_user_id。 */
+export interface Guild {
+  id: string;
+  name: string;
+  leaderUserId: string;
+  createdAt: string;
+}
+
+/** 军团成员领域对象。joinedAt 映射 guild_members.joined_at。 */
+export interface GuildMember {
+  guildId: string;
+  userId: string;
+  joinedAt: string;
+}
+
+/** 列出全部军团。 */
+export async function fetchGuilds(
+  client: SupabaseClient = supabase,
+): Promise<Guild[]> {
+  const { data, error } = await client
+    .from('guilds')
+    .select('id,name,leader_user_id,created_at')
+    .order('created_at');
+  if (error) throw new Error(`读取军团失败：${error.message}`);
+  return (data ?? []).map((r) => toGuild(r));
+}
+
+/** 读取玩家所属军团：先经 guild_members 反查 guild_id，再读 guilds；无则 null。 */
+export async function fetchMyGuild(
+  userId: string,
+  client: SupabaseClient = supabase,
+): Promise<Guild | null> {
+  const { data: m, error } = await client
+    .from('guild_members')
+    .select('guild_id')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw new Error(`读取所属军团失败：${error.message}`);
+  if (!m?.guild_id) return null;
+
+  const { data: g, error: gErr } = await client
+    .from('guilds')
+    .select('id,name,leader_user_id,created_at')
+    .eq('id', m.guild_id)
+    .maybeSingle();
+  if (gErr) throw new Error(`读取军团失败：${gErr.message}`);
+  return g ? toGuild(g) : null;
+}
+
+/** 列出某军团的全部成员。 */
+export async function fetchGuildMembers(
+  guildId: string,
+  client: SupabaseClient = supabase,
+): Promise<GuildMember[]> {
+  const { data, error } = await client
+    .from('guild_members')
+    .select('guild_id,user_id,joined_at')
+    .eq('guild_id', guildId);
+  if (error) throw new Error(`读取军团成员失败：${error.message}`);
+  return (data ?? []).map((r) => ({
+    guildId: r.guild_id,
+    userId: r.user_id,
+    joinedAt: new Date(r.joined_at).toISOString(),
+  }));
+}
+
+/** 创建军团：插入 guilds 并让创建者作为 leader 加入 guild_members。 */
+export async function createGuild(
+  userId: string,
+  name: string,
+  client: SupabaseClient = supabase,
+): Promise<Guild> {
+  const guildId = crypto.randomUUID();
+  const createdAt = new Date().toISOString();
+  const { error } = await client.from('guilds').insert({
+    id: guildId,
+    name,
+    leader_user_id: userId,
+    created_at: createdAt,
+  });
+  if (error) throw new Error(`创建军团失败：${error.message}`);
+  const { error: mErr } = await client.from('guild_members').insert({
+    guild_id: guildId,
+    user_id: userId,
+  });
+  if (mErr) throw new Error(`创建军团失败：${mErr.message}`);
+  return { id: guildId, name, leaderUserId: userId, createdAt };
+}
+
+/** 加入军团：插入本人 guild_members 行。 */
+export async function joinGuild(
+  userId: string,
+  guildId: string,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client.from('guild_members').insert({
+    guild_id: guildId,
+    user_id: userId,
+  });
+  if (error) throw new Error(`加入军团失败：${error.message}`);
+}
+
+/** 退出军团：删除本人 guild_members 行。 */
+export async function leaveGuild(
+  userId: string,
+  guildId: string,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client
+    .from('guild_members')
+    .delete()
+    .eq('guild_id', guildId)
+    .eq('user_id', userId);
+  if (error) throw new Error(`退出军团失败：${error.message}`);
+}
+
+// ---------------------------------------------------------------------------
 // 写入
 // ---------------------------------------------------------------------------
 
@@ -717,6 +837,16 @@ export async function upgradeWeapon(
 // ---------------------------------------------------------------------------
 // 私有辅助
 // ---------------------------------------------------------------------------
+
+/** 数据库 guilds 行 → Guild。 */
+function toGuild(row: Record<string, unknown>): Guild {
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    leaderUserId: row.leader_user_id as string,
+    createdAt: new Date(row.created_at as string).toISOString(),
+  };
+}
 
 /** 数据库行军行 → WorldMarch（时间序列化为 ISO 字符串）。 */
 function toWorldMarch(row: Record<string, unknown>): WorldMarch {
