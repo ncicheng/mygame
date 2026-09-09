@@ -718,3 +718,293 @@ INSERT INTO troop_stats (soldier_level, power) VALUES
   (13, 13),
   (14, 14),
   (15, 15);
+
+-- =============================================================
+-- 19. PvP 战斗记录（battle_instances/battle_reports 为野地 PvE 专用：
+--     二者含 NOT NULL 野地外键与野地回写 RLS，无法承载 1v1 PvP，
+--     故为 PvP 另建一对表。均只读，写入由 resolve_pvp（SECURITY DEFINER）负责）
+-- =============================================================
+CREATE TABLE pvp_battle_instances (
+  id text PRIMARY KEY,
+  challenger_general_id text NOT NULL REFERENCES generals(id) ON DELETE CASCADE,
+  target_general_id text NOT NULL REFERENCES generals(id) ON DELETE CASCADE,
+  challenger_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  target_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  challenger_power integer NOT NULL,
+  target_power integer NOT NULL,
+  winner text CHECK (winner IN ('challenger','target')),  -- NULL 表示平局
+  challenger_casualties integer NOT NULL,
+  target_casualties integer NOT NULL,
+  result text NOT NULL CHECK (result IN ('challenger_win','challenger_lose','draw')),
+  log jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE pvp_battle_reports (
+  id text PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  general_id text NOT NULL REFERENCES generals(id) ON DELETE CASCADE,
+  battle_instance_id text NOT NULL REFERENCES pvp_battle_instances(id) ON DELETE CASCADE,
+  opponent_general_id text NOT NULL REFERENCES generals(id) ON DELETE CASCADE,
+  victory boolean NOT NULL,
+  attacker_casualties integer NOT NULL,
+  defender_casualties integer NOT NULL,
+  log jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE pvp_battle_instances ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pvp_battle_reports ENABLE ROW LEVEL SECURITY;
+
+-- 双方（挑战者/被挑战者）可读战斗记录；写入由 SECURITY DEFINER RPC 完成
+CREATE POLICY pvp_battle_instances_select ON pvp_battle_instances
+  FOR SELECT USING (auth.uid() IN (challenger_user_id, target_user_id));
+-- 每名玩家只读自己的战报
+CREATE POLICY pvp_battle_reports_select ON pvp_battle_reports
+  FOR SELECT USING (auth.uid() = user_id);
+
+-- =============================================================
+-- 20. resolve_pvp：1v1 PvP 服务器权威战斗结算（SECURITY DEFINER）
+-- =============================================================
+-- SECURITY DEFINER 以函数所有者（postgres/supabase_admin）身份执行，
+-- 绕过 RLS，从而可同时原子更新双方 army_units / challenges / pvp 记录。
+-- 公式镜像 shared/src/combat.ts：
+--   generalMultiplier(level, stars) = 1 + (level-1)*0.05 + (stars-1)*0.10
+--   armyPower = SUM(count × troop_stats.power)
+--   effectiveWeaponTier = min(weaponTier, maxSoldierLevel)（无兵/无武器为 0）
+--   generalSidePower = generalMultiplier × armyPower + effectiveWeaponTier*50
+--   winProbability = 1/(1+exp(-slope*ln(attacker/defender))), slope=2.0
+--   胜方轻损 15%、败方重损 70%（战损 = floor(count×rate)）
+-- 胜负判定：完全均势 → 平局；否则用「双方 id + 挑战 id」哈希做确定性种子，
+-- 模拟 combat.ts 的 mulberry32 种子随机（rand < winProbability）。
+-- 注：plpgsql 函数内不允许显式 COMMIT/ROLLBACK，EXCEPTION 子句会为函数
+-- 主体建立子事务，异常时自动回滚并重抛，保证整体原子性。
+CREATE OR REPLACE FUNCTION resolve_pvp(
+  p_challenger_general_id text,
+  p_target_general_id text
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_caller uuid := auth.uid();
+  -- 挑战者武将
+  v_ch_user uuid;
+  v_ch_level integer;
+  v_ch_stars integer;
+  v_ch_weapon_id text;
+  -- 目标武将
+  v_tg_user uuid;
+  v_tg_level integer;
+  v_tg_stars integer;
+  v_tg_weapon_id text;
+  -- 战力计算
+  v_ch_army numeric;
+  v_tg_army numeric;
+  v_ch_max_level integer;
+  v_tg_max_level integer;
+  v_ch_weapon_tier integer;
+  v_tg_weapon_tier integer;
+  v_ch_weapon_eff integer;
+  v_tg_weapon_eff integer;
+  v_ch_mult numeric;
+  v_tg_mult numeric;
+  v_ch_power numeric;
+  v_tg_power numeric;
+  v_win_prob numeric;
+  v_seed bigint;
+  v_rand numeric;
+  v_attacker_won boolean;
+  v_result text;
+  v_winner text;
+  v_ch_rate numeric;
+  v_tg_rate numeric;
+  -- 挑战记录
+  v_challenge_id text;
+  -- 战损统计
+  v_row record;
+  v_lost integer;
+  v_ch_casualties integer := 0;
+  v_tg_casualties integer := 0;
+  -- 战斗记录
+  v_battle_id text;
+  v_log jsonb;
+  v_ch_power_int integer;
+  v_tg_power_int integer;
+BEGIN
+  -- 1. 校验：登录态 + 双方武将存在 + 归属 + 非自挑战
+  IF v_caller IS NULL THEN
+    RAISE EXCEPTION 'resolve_pvp: 未登录';
+  END IF;
+  IF p_challenger_general_id = p_target_general_id THEN
+    RAISE EXCEPTION 'resolve_pvp: 不能挑战自己的武将';
+  END IF;
+
+  SELECT user_id, level, stars, weapon_id
+    INTO v_ch_user, v_ch_level, v_ch_stars, v_ch_weapon_id
+    FROM generals
+   WHERE id = p_challenger_general_id;
+  IF v_ch_user IS NULL THEN
+    RAISE EXCEPTION 'resolve_pvp: 挑战者武将不存在 %', p_challenger_general_id;
+  END IF;
+  IF v_ch_user <> v_caller THEN
+    RAISE EXCEPTION 'resolve_pvp: 无权以他人武将发起挑战';
+  END IF;
+
+  SELECT user_id, level, stars, weapon_id
+    INTO v_tg_user, v_tg_level, v_tg_stars, v_tg_weapon_id
+    FROM generals
+   WHERE id = p_target_general_id;
+  IF v_tg_user IS NULL THEN
+    RAISE EXCEPTION 'resolve_pvp: 目标武将不存在 %', p_target_general_id;
+  END IF;
+
+  -- 2. 复用或新建双方 pending 挑战（同一方向尚无 pending 则补建一条）
+  SELECT id INTO v_challenge_id
+    FROM challenges
+   WHERE challenger_general_id = p_challenger_general_id
+     AND target_general_id = p_target_general_id
+     AND status = 'pending'
+   ORDER BY created_at DESC
+   LIMIT 1;
+  IF v_challenge_id IS NULL THEN
+    INSERT INTO challenges (id, challenger_user_id, target_user_id, challenger_general_id, target_general_id, status)
+    VALUES (gen_random_uuid()::text, v_ch_user, v_tg_user, p_challenger_general_id, p_target_general_id, 'pending')
+    RETURNING id INTO v_challenge_id;
+  END IF;
+
+  -- 3. 战力：armyPower = SUM(count × troop_stats.power) + maxSoldierLevel
+  SELECT COALESCE(SUM(u.count * COALESCE(ts.power, 0)), 0),
+         COALESCE(MAX(u.soldier_level), 0)
+    INTO v_ch_army, v_ch_max_level
+    FROM army_units u
+    LEFT JOIN troop_stats ts ON ts.soldier_level = u.soldier_level
+   WHERE u.general_id = p_challenger_general_id;
+  SELECT COALESCE(SUM(u.count * COALESCE(ts.power, 0)), 0),
+         COALESCE(MAX(u.soldier_level), 0)
+    INTO v_tg_army, v_tg_max_level
+    FROM army_units u
+    LEFT JOIN troop_stats ts ON ts.soldier_level = u.soldier_level
+   WHERE u.general_id = p_target_general_id;
+
+  -- 武器阶
+  SELECT tier INTO v_ch_weapon_tier FROM weapons WHERE id = v_ch_weapon_id;
+  SELECT tier INTO v_tg_weapon_tier FROM weapons WHERE id = v_tg_weapon_id;
+
+  -- effectiveWeaponTier = min(tier, maxSoldierLevel)，无兵或无武器为 0
+  v_ch_weapon_eff := CASE
+    WHEN v_ch_weapon_tier IS NOT NULL AND v_ch_max_level > 0 THEN LEAST(v_ch_weapon_tier, v_ch_max_level)
+    ELSE 0 END;
+  v_tg_weapon_eff := CASE
+    WHEN v_tg_weapon_tier IS NOT NULL AND v_tg_max_level > 0 THEN LEAST(v_tg_weapon_tier, v_tg_max_level)
+    ELSE 0 END;
+
+  -- generalMultiplier = 1 + (level-1)*0.05 + (stars-1)*0.10
+  v_ch_mult := 1 + (v_ch_level - 1) * 0.05 + (v_ch_stars - 1) * 0.10;
+  v_tg_mult := 1 + (v_tg_level - 1) * 0.05 + (v_tg_stars - 1) * 0.10;
+
+  -- generalSidePower = multiplier × armyPower + weaponBonus（每阶 +50）
+  v_ch_power := v_ch_mult * v_ch_army + v_ch_weapon_eff * 50;
+  v_tg_power := v_tg_mult * v_tg_army + v_tg_weapon_eff * 50;
+
+  -- 4. 胜率：winProbability（logistic，slope=2.0；含 combat.ts 边界情况）
+  IF v_tg_power <= 0 THEN
+    v_win_prob := CASE WHEN v_ch_power <= 0 THEN 0.5 ELSE 1 END;
+  ELSIF v_ch_power <= 0 THEN
+    v_win_prob := 0;
+  ELSE
+    v_win_prob := 1 / (1 + exp(-2.0 * ln(v_ch_power / v_tg_power)));
+  END IF;
+
+  -- 5. 胜负判定：完全均势 → 平局；否则种子随机驱动胜率（rand < winProb）
+  IF v_ch_power = v_tg_power THEN
+    v_result := 'draw';
+    v_winner := NULL;
+    v_attacker_won := NULL;
+  ELSE
+    v_seed := abs(hashtext(p_challenger_general_id || '|' || p_target_general_id || '|' || v_challenge_id)::bigint);
+    v_rand := (v_seed % 1000000) / 1000000.0;
+    v_attacker_won := v_rand < v_win_prob;
+    IF v_attacker_won THEN
+      v_result := 'challenger_win';
+      v_winner := 'challenger';
+    ELSE
+      v_result := 'challenger_lose';
+      v_winner := 'target';
+    END IF;
+  END IF;
+
+  -- 6. 战损率：胜方 15%、败方 70%；平局无战损
+  IF v_result = 'draw' THEN
+    v_ch_rate := 0;
+    v_tg_rate := 0;
+  ELSIF v_attacker_won THEN
+    v_ch_rate := 0.15;
+    v_tg_rate := 0.70;
+  ELSE
+    v_ch_rate := 0.70;
+    v_tg_rate := 0.15;
+  END IF;
+
+  -- 逐堆结算双方战损：count = count - floor(count×rate)，归零则删除
+  FOR v_row IN SELECT id, count FROM army_units WHERE general_id = p_challenger_general_id LOOP
+    v_lost := floor(v_row.count * v_ch_rate)::integer;
+    v_ch_casualties := v_ch_casualties + v_lost;
+    IF (v_row.count - v_lost) <= 0 THEN
+      DELETE FROM army_units WHERE id = v_row.id;
+    ELSE
+      UPDATE army_units SET count = v_row.count - v_lost WHERE id = v_row.id;
+    END IF;
+  END LOOP;
+  FOR v_row IN SELECT id, count FROM army_units WHERE general_id = p_target_general_id LOOP
+    v_lost := floor(v_row.count * v_tg_rate)::integer;
+    v_tg_casualties := v_tg_casualties + v_lost;
+    IF (v_row.count - v_lost) <= 0 THEN
+      DELETE FROM army_units WHERE id = v_row.id;
+    ELSE
+      UPDATE army_units SET count = v_row.count - v_lost WHERE id = v_row.id;
+    END IF;
+  END LOOP;
+
+  -- 7. 写 PvP 战斗记录 + 双方战报（每名玩家各一条）
+  v_ch_power_int := round(v_ch_power)::integer;
+  v_tg_power_int := round(v_tg_power)::integer;
+  v_log := jsonb_build_object(
+    'challenger', jsonb_build_object('general_id', p_challenger_general_id, 'power', v_ch_power_int, 'casualties', v_ch_casualties),
+    'target', jsonb_build_object('general_id', p_target_general_id, 'power', v_tg_power_int, 'casualties', v_tg_casualties),
+    'win_prob', round(v_win_prob::numeric, 4),
+    'result', v_result
+  );
+
+  INSERT INTO pvp_battle_instances (id, challenger_general_id, target_general_id, challenger_user_id, target_user_id, challenger_power, target_power, winner, challenger_casualties, target_casualties, result, log, created_at)
+  VALUES (gen_random_uuid()::text, p_challenger_general_id, p_target_general_id, v_ch_user, v_tg_user, v_ch_power_int, v_tg_power_int, v_winner, v_ch_casualties, v_tg_casualties, v_result, v_log, now())
+  RETURNING id INTO v_battle_id;
+
+  -- 挑战者战报：victory = 挑战者胜
+  INSERT INTO pvp_battle_reports (id, user_id, general_id, battle_instance_id, opponent_general_id, victory, attacker_casualties, defender_casualties, log, created_at)
+  VALUES (gen_random_uuid()::text, v_ch_user, p_challenger_general_id, v_battle_id, p_target_general_id, COALESCE(v_attacker_won, false), v_ch_casualties, v_tg_casualties, v_log, now());
+  -- 目标战报：victory = 挑战者败
+  INSERT INTO pvp_battle_reports (id, user_id, general_id, battle_instance_id, opponent_general_id, victory, attacker_casualties, defender_casualties, log, created_at)
+  VALUES (gen_random_uuid()::text, v_tg_user, p_target_general_id, v_battle_id, p_challenger_general_id, COALESCE(NOT v_attacker_won, false), v_ch_casualties, v_tg_casualties, v_log, now());
+
+  -- 8. 更新挑战状态为已结算
+  UPDATE challenges SET status = 'resolved', result = v_result, resolved_at = now()
+   WHERE id = v_challenge_id;
+
+  -- 9. 返回摘要
+  RETURN jsonb_build_object(
+    'challenge_id', v_challenge_id,
+    'battle_instance_id', v_battle_id,
+    'result', v_result,
+    'winner', v_winner,
+    'attacker', jsonb_build_object('general_id', p_challenger_general_id, 'power', v_ch_power_int, 'casualties', v_ch_casualties),
+    'defender', jsonb_build_object('general_id', p_target_general_id, 'power', v_tg_power_int, 'casualties', v_tg_casualties)
+  );
+
+EXCEPTION WHEN OTHERS THEN
+  -- 子事务自动回滚后重抛，保证整体原子性
+  RAISE;
+END;
+$$;
