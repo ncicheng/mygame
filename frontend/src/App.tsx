@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { getCurrentUser, onAuthChange, signOut, type AuthUser } from './auth';
 import { AuthForm } from './AuthForm';
 import { WorldView } from './WorldView';
+import { Tutorial } from './Tutorial';
 import './theme.css';
 
 function App() {
@@ -51,10 +52,20 @@ function App() {
     setUser(null);
   }, []);
 
+  // 首次登录展示新手引导：本地标记未完成则显示覆盖层，完成后写入 localStorage
+  const [tutorialDone, setTutorialDone] = useState<boolean>(
+    () => localStorage.getItem('mygame_tutorial_done') === '1',
+  );
+  const handleTutorialClose = useCallback(() => {
+    localStorage.setItem('mygame_tutorial_done', '1');
+    setTutorialDone(true);
+  }, []);
+
   return (
     <>
       {!loading && user === null && <AuthForm />}
       {user !== null && <WorldView user={user} onLogout={handleLogout} />}
+      {user !== null && !tutorialDone && <Tutorial onClose={handleTutorialClose} />}
       {loading && user === null && (
         <main className="mg-gradient" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
           <p className="mg-title">正在读取存档…</p>
