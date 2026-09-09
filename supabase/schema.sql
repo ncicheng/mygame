@@ -475,6 +475,7 @@ CREATE OR REPLACE FUNCTION seed_new_user()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
   v_world_id text;
