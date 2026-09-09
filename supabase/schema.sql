@@ -300,9 +300,9 @@ CREATE POLICY weapons_update ON weapons
 CREATE POLICY weapons_delete ON weapons
   FOR DELETE USING (auth.uid() = user_id);
 
--- ---------------- generals（仅本人） ----------------
+-- ---------------- generals（共享世界：登录用户可见所有武将，写操作仅本人） ----------------
 CREATE POLICY generals_select ON generals
-  FOR SELECT USING (auth.uid() = user_id);
+  FOR SELECT USING (auth.uid() IS NOT NULL);
 CREATE POLICY generals_insert ON generals
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY generals_update ON generals
@@ -310,9 +310,9 @@ CREATE POLICY generals_update ON generals
 CREATE POLICY generals_delete ON generals
   FOR DELETE USING (auth.uid() = user_id);
 
--- ---------------- cities（仅本人；INSERT 须指定本人） ----------------
+-- ---------------- cities（共享世界：登录用户可见所有城池，写操作仅本人） ----------------
 CREATE POLICY cities_select ON cities
-  FOR SELECT USING (auth.uid() = owner_user_id);
+  FOR SELECT USING (auth.uid() IS NOT NULL);
 CREATE POLICY cities_insert ON cities
   FOR INSERT WITH CHECK (auth.uid() = owner_user_id);
 CREATE POLICY cities_update ON cities
