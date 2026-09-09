@@ -20,6 +20,15 @@ test('招募 100 乡勇后任务 1 完成', () => {
   assert.equal(r.done, true);
 });
 
+test('多个 level-1 兵种条目的数量累加后满足招募任务', () => {
+  const s = q({ troops: [
+    { soldierType: '乡勇', soldierLevel: 1, count: 60 },
+    { soldierType: '乡勇', soldierLevel: 1, count: 60 },
+  ] });
+  const r = s.quests.find((x) => x.id === 'recruit')!;
+  assert.equal(r.done, true);
+});
+
 test('有战报则行军/打野/胜利任务完成', () => {
   const s = q({ reports: [{ id: 'r1', victory: true } as BattleReport] });
   assert.equal(s.quests.find((x) => x.id === 'march')!.done, true);
