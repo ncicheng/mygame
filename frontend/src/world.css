@@ -156,6 +156,10 @@
   font-weight: 700;
 }
 
+.vc .trow .hint {
+  color: var(--mg-text-dim);
+}
+
 .vc .bar {
   height: 8px;
   background: rgba(255, 255, 255, 0.08);

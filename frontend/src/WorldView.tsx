@@ -20,6 +20,7 @@ import {
   finalizeMarch,
 } from './data';
 import { computeMarchPosition, issueMarch, settleBattle } from './game';
+import { computeQuests } from './quests';
 import { ActionDeck } from './ActionDeck';
 import { BattleOverlay } from './BattleOverlay';
 import { CopyrightFooter } from './CopyrightFooter';
@@ -395,7 +396,18 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
           {marchErr && <div className="march-err">{marchErr}</div>}
         </section>
         <aside className="col">
-          <RightColumn resources={resources} world={world} reports={reports} onOpenReport={setActiveReport} />
+          <RightColumn
+            resources={resources}
+            reports={reports}
+            quests={computeQuests({
+              reports,
+              troops: general?.army ?? [],
+              weaponTier: general?.weapon?.tier ?? 1,
+              troopMaxUnlocked: troopMax,
+              generalLevel: general?.level ?? 1,
+            })}
+            onOpenReport={setActiveReport}
+          />
         </aside>
       </div>
       <footer className="vc-bottom">
