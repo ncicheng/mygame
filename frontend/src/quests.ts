@@ -1,4 +1,4 @@
-import type { BattleReport, Soldier } from '@mygame/shared';
+import type { BattleReport, Soldier, WorldArmy } from '@mygame/shared';
 
 export interface Quest {
   id: string;
@@ -16,6 +16,7 @@ export interface QuestState {
 export interface QuestInput {
   reports: BattleReport[];
   troops: Soldier[];
+  armies: WorldArmy[];
   weaponTier: number;
   troopMaxUnlocked: number;
   generalLevel: number;
@@ -23,7 +24,7 @@ export interface QuestInput {
 
 const DEFS = [
   { id: 'recruit', title: '招募 100 乡勇', hint: '底部操作台 → 招募，用粮草招募乡勇', done: (i: QuestInput) => i.troops.filter((t) => t.soldierLevel === 1).reduce((s, t) => s + t.count, 0) >= 100 },
-  { id: 'march', title: '发起一次行军', hint: '选中我方武将 → 点地图目标格下达行军', done: (i: QuestInput) => i.reports.length >= 1 || i.troops.length >= 1 },
+  { id: 'march', title: '发起一次行军', hint: '选中我方武将 → 点地图目标格下达行军', done: (i: QuestInput) => i.armies.some((a) => a.march) || i.reports.length >= 1 },
   { id: 'bandit', title: '首次攻打野地', hint: '选中武将 → 点野地 → 打野', done: (i: QuestInput) => i.reports.length >= 1 },
   { id: 'win', title: '首次打野胜利', hint: '打野胜利后战报显示 🏆', done: (i: QuestInput) => i.reports.some((r) => r.victory) },
   { id: 'weapon', title: '强化武器到 2 阶', hint: '左栏养成卡 → 武器强化（耗稀有材料）', done: (i: QuestInput) => i.weaponTier >= 2 },

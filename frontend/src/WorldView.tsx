@@ -402,6 +402,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
             quests={computeQuests({
               reports,
               troops: general?.army ?? [],
+              armies: world.armies,
               weaponTier: general?.weapon?.tier ?? 1,
               troopMaxUnlocked: troopMax,
               generalLevel: general?.level ?? 1,
