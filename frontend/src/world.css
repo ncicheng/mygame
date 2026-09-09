@@ -280,6 +280,16 @@
   box-shadow: 0 0 8px rgba(240, 180, 41, 0.8);
 }
 
+/* 野地呼吸光：引导去打野 */
+.vc .mg-glow-bandit {
+  animation: banditGlow 1.6s ease-in-out infinite;
+}
+
+@keyframes banditGlow {
+  0%, 100% { box-shadow: 0 0 6px rgba(240, 180, 41, 0.5); }
+  50% { box-shadow: 0 0 14px rgba(240, 180, 41, 0.95); }
+}
+
 .vc .mk-army-me {
   background: var(--mg-jade);
   color: #06251e;

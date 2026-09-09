@@ -31,7 +31,7 @@ export const TERRAIN_NAMES: Record<Terrain, string> = {
 /** 标记样式类：城池/野地/部队 × 我方/敌方 */
 function markerClass(marker: BoardMarker): string {
   if (marker.kind === 'bandit') {
-    return 'mk-bandit';
+    return 'mk-bandit mg-glow-bandit';
   }
   return `mk-${marker.kind}-${marker.side === 'me' ? 'me' : 'enm'}`;
 }

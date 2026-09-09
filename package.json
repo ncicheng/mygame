@@ -10,8 +10,5 @@
     "dev": "npm run build -w @mygame/shared && npm run dev -w @mygame/frontend",
     "build": "npm run build -w @mygame/shared && npm run build -w @mygame/frontend",
     "test": "npm run test -w @mygame/frontend"
-  },
-  "devDependencies": {
-    "concurrently": "^9.1.2"
   }
 }

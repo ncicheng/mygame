@@ -3,6 +3,7 @@ import { getCurrentUser, onAuthChange, signOut, type AuthUser } from './auth';
 import { AuthForm } from './AuthForm';
 import { WorldView } from './WorldView';
 import { Tutorial } from './Tutorial';
+import { CopyrightFooter } from './CopyrightFooter';
 import './theme.css';
 
 function App() {
@@ -71,6 +72,7 @@ function App() {
           <p className="mg-title">正在读取存档…</p>
         </main>
       )}
+      {loading && user === null && <CopyrightFooter />}
       {error && !loading && user === null && (
         <div
           role="alert"
@@ -92,6 +94,7 @@ function App() {
           {error}
         </div>
       )}
+      {error && !loading && user === null && <CopyrightFooter />}
     </>
   );
 }
