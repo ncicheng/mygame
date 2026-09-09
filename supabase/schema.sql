@@ -671,3 +671,50 @@ CREATE POLICY guild_members_insert ON guild_members
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY guild_members_delete ON guild_members
   FOR DELETE USING (auth.uid() = user_id);
+
+-- =============================================================
+-- 17. PvP 挑战（1v1）：发起/结算/取消，结算由 SECURITY DEFINER RPC 写入
+-- =============================================================
+CREATE TABLE challenges (
+  id text PRIMARY KEY,
+  challenger_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  target_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  challenger_general_id text REFERENCES generals(id),
+  target_general_id text REFERENCES generals(id),
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','resolved','cancelled')),
+  result text CHECK (result IN ('challenger_win','challenger_lose','draw')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  resolved_at timestamptz
+);
+ALTER TABLE challenges ENABLE ROW LEVEL SECURITY;
+-- 双方（挑战者/被挑战者）可读自己的挑战；发起者写；结算由 RPC（SECURITY DEFINER）写
+CREATE POLICY challenges_select ON challenges
+  FOR SELECT USING (auth.uid() IN (challenger_user_id, target_user_id));
+CREATE POLICY challenges_insert ON challenges
+  FOR INSERT WITH CHECK (auth.uid() = challenger_user_id);
+
+-- =============================================================
+-- 18. 兵种单兵战力表（1-15 级）：供 SECURITY DEFINER RPC 查询
+-- =============================================================
+-- 本表镜像 shared/src/troops.ts 的 TROOP_CATALOG（单兵 power）。
+-- 单一数据源是 shared/src/troops.ts；troop_stats 是给 RPC 用的 SQL 侧副本，改动须两边同步。
+CREATE TABLE troop_stats (
+  soldier_level integer PRIMARY KEY,
+  power integer NOT NULL
+);
+INSERT INTO troop_stats (soldier_level, power) VALUES
+  (1, 1),
+  (2, 2),
+  (3, 3),
+  (4, 4),
+  (5, 5),
+  (6, 6),
+  (7, 7),
+  (8, 8),
+  (9, 9),
+  (10, 10),
+  (11, 11),
+  (12, 12),
+  (13, 13),
+  (14, 14),
+  (15, 15);
