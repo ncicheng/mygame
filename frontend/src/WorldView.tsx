@@ -12,12 +12,20 @@ import { INITIAL_TROOP_UNLOCK, MARCH_TILE_MS } from '@mygame/shared';
 import type { AuthUser } from './auth';
 import {
   cancelMarch,
+  createGuild,
   fetchGeneral,
+  fetchGuildMembers,
+  fetchGuilds,
+  fetchMyGuild,
   fetchReports,
   fetchResources,
   fetchTroopMaxUnlocked,
   fetchWorld,
   finalizeMarch,
+  joinGuild,
+  leaveGuild,
+  type Guild,
+  type GuildMember,
 } from './data';
 import { computeMarchPosition, issueMarch, settleBattle } from './game';
 import { computeQuests } from './quests';
@@ -86,6 +94,10 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
   const [general, setGeneral] = useState<General | null>(null);
   const [resources, setResources] = useState<Resources | null>(null);
   const [troopMax, setTroopMax] = useState<number>(INITIAL_TROOP_UNLOCK);
+  // 军团数据：所属军团、可加入列表、成员
+  const [myGuild, setMyGuild] = useState<Guild | null>(null);
+  const [guilds, setGuilds] = useState<Guild[]>([]);
+  const [guildMembers, setGuildMembers] = useState<GuildMember[]>([]);
   const worldRef = useRef<WorldStateResponse | null>(null);
   const pendingBattleRef = useRef(false);
   const lastAutoReportRef = useRef<string | null>(null);
@@ -95,12 +107,14 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
   // 世界状态与玩家数据（各取所需，任一失败不拖累整体）
   const refreshAll = useCallback(
     async (showError: boolean) => {
-      const [w, gen, res, max, rep] = await Promise.allSettled([
+      const [w, gen, res, max, rep, myG, gs] = await Promise.allSettled([
         fetchWorld(user.id),
         fetchGeneral(user.id),
         fetchResources(user.id),
         fetchTroopMaxUnlocked(user.id),
         fetchReports(user.id),
+        fetchMyGuild(user.id),
+        fetchGuilds(),
       ]);
       if (w.status === 'fulfilled') {
         setWorld((prev) => mergeActiveMarchPositions(w.value, prev));
@@ -111,6 +125,17 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
       if (res.status === 'fulfilled') setResources(res.value);
       if (max.status === 'fulfilled') setTroopMax(max.value);
       if (rep.status === 'fulfilled') setReports(rep.value);
+      if (myG.status === 'fulfilled') {
+        setMyGuild(myG.value);
+        // 已加入军团时加载其成员列表
+        if (myG.value) {
+          const mem = await fetchGuildMembers(myG.value.id);
+          setGuildMembers(mem);
+        } else {
+          setGuildMembers([]);
+        }
+      }
+      if (gs.status === 'fulfilled') setGuilds(gs.value);
     },
     [user.id],
   );
@@ -327,6 +352,43 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
     void refreshAll(false);
   }, [refreshAll]);
 
+  // 军团操作：调用 data.ts 后刷新军团数据
+  const handleCreateGuild = useCallback(
+    async (name: string) => {
+      try {
+        await createGuild(user.id, name);
+        await refreshAll(false);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [user.id, refreshAll],
+  );
+
+  const handleJoinGuild = useCallback(
+    async (guildId: string) => {
+      try {
+        await joinGuild(user.id, guildId);
+        await refreshAll(false);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [user.id, refreshAll],
+  );
+
+  const handleLeaveGuild = useCallback(
+    async (guildId: string) => {
+      try {
+        await leaveGuild(user.id, guildId);
+        await refreshAll(false);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [user.id, refreshAll],
+  );
+
   if (error || !world) {
     return (
       <div className="vc">
@@ -410,6 +472,12 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
               generalLevel: general?.level ?? 1,
             })}
             onOpenReport={setActiveReport}
+            myGuild={myGuild}
+            guilds={guilds}
+            members={guildMembers}
+            onCreateGuild={(name) => void handleCreateGuild(name)}
+            onJoinGuild={(guildId) => void handleJoinGuild(guildId)}
+            onLeaveGuild={(guildId) => void handleLeaveGuild(guildId)}
           />
         </aside>
       </div>
