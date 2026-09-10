@@ -576,3 +576,19 @@ EXCEPTION WHEN OTHERS THEN
   RAISE;
 END;
 $$;
+
+-- [5] 野地刷新（攻破 5 分钟后重现）
+CREATE OR REPLACE FUNCTION refresh_wildlands(p_world_id text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  UPDATE wildlands
+  SET defeated_at = NULL
+  WHERE world_id = p_world_id
+    AND defeated_at IS NOT NULL
+    AND defeated_at < now() - interval '5 minutes';
+END;
+$$;
