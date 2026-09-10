@@ -120,6 +120,7 @@ function makeFakeSupabase(
         rpcCalls.push({ method: 'rpc', args: a });
         tables.set('rpc', rpcCalls);
         const raw = perTable['rpc'] as { data?: unknown; error?: { message: string } | null } | undefined;
+        order.push('rpc');
         return Promise.resolve(
           raw && 'error' in raw
             ? { data: raw.data ?? {}, error: raw.error }
@@ -136,7 +137,7 @@ const USER = 'u1';
 const GEN = 'g1';
 
 test('fetchWorld 组装世界/地形/城池/野地/部队/行动点', async () => {
-  const { client } = makeFakeSupabase({
+  const { client, order, callsOf } = makeFakeSupabase({
     generals: [
       { id: GEN, user_id: USER, name: '队长', x: 2, y: 3, created_at: '2020-01-01T00:00:00Z', world_id: 'w1' },
     ],
@@ -183,6 +184,12 @@ test('fetchWorld 组装世界/地形/城池/野地/部队/行动点', async () =
   assert.equal(ws.armies[0].march!.generalId, GEN);
   assert.equal(ws.actionPoints.current, 3);
   assert.equal(ws.actionPoints.max, 5);
+
+  // 查询野地前应先刷新攻破超时的野地
+  const refreshRpc = callsOf('rpc').find((c) => (c.args[0] as string) === 'refresh_wildlands');
+  assert.ok(refreshRpc, 'fetchWorld 应先调用 refresh_wildlands');
+  assert.deepEqual(refreshRpc!.args[1], { p_world_id: 'w1' });
+  assert.ok(order.indexOf('rpc') < order.indexOf('wildlands'), 'refresh_wildlands 应先于 wildlands 查询');
 });
 
 test('fetchResources 把列组装成 Resources', async () => {
