@@ -23,6 +23,8 @@ import {
   createGuild,
   joinGuild,
   leaveGuild,
+  initiateChallenge,
+  fetchChallenges,
 } from '../src/data.js';
 import type { CombatResult, CombatUnit } from '@mygame/shared';
 
@@ -63,6 +65,7 @@ function makeFakeSupabase(
       'limit',
       'is',
       'filter',
+      'or',
       'single',
       'maybeSingle',
     ]) {
@@ -108,7 +111,20 @@ function makeFakeSupabase(
     return q;
   };
   return {
-    client: { from } as unknown as SupabaseClient,
+      client: {
+      from,
+      rpc: (...a: unknown[]) => {
+        const rpcCalls = tables.get('rpc') ?? [];
+        rpcCalls.push({ method: 'rpc', args: a });
+        tables.set('rpc', rpcCalls);
+        const raw = perTable['rpc'] as { data?: unknown; error?: { message: string } | null } | undefined;
+        return Promise.resolve(
+          raw && 'error' in raw
+            ? { data: raw.data ?? {}, error: raw.error }
+            : { data: {}, error: null },
+        );
+      },
+    } as unknown as SupabaseClient,
     order,
     callsOf: (t: string) => tables.get(t) ?? [],
   };
@@ -538,4 +554,63 @@ test('fetchGuildMembers 列出军团成员', async () => {
   const list = await fetchGuildMembers('g1', client);
   assert.equal(list.length, 2);
   assert.deepEqual(list[0], { guildId: 'g1', userId: USER, joinedAt: '2020-01-01T00:00:00.000Z' });
+});
+
+test('initiateChallenge 插入 pending 挑战并调用 resolve_pvp', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    generals: [{ id: 'tgt', user_id: 'u2' }],
+    challenges: { data: null, error: null },
+  });
+  await initiateChallenge(USER, 'chg', 'tgt', client);
+
+  const ins = callsOf('challenges').find((c) => c.method === 'insert');
+  assert.ok(ins, '应插入 challenges');
+  const row = ins!.args[0] as Record<string, unknown>;
+  assert.equal(row.challenger_user_id, USER);
+  assert.equal(row.target_user_id, 'u2');
+  assert.equal(row.challenger_general_id, 'chg');
+  assert.equal(row.target_general_id, 'tgt');
+  assert.equal(row.status, 'pending');
+
+  const rpcCall = callsOf('rpc').find((c) => (c.args[0] as string) === 'resolve_pvp');
+  assert.ok(rpcCall, '应调用 resolve_pvp');
+  assert.deepEqual(rpcCall!.args[1], { p_challenger_general_id: 'chg', p_target_general_id: 'tgt' });
+});
+
+test('initiateChallenge resolve_pvp 失败时删除刚插入的 pending 行并抛错', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    generals: [{ id: 'tgt', user_id: 'u2' }],
+    challenges: { data: [{ id: 'cX' }], error: null },
+    rpc: { data: null, error: { message: 'boom' } },
+  });
+
+  await assert.rejects(() => initiateChallenge(USER, 'chg', 'tgt', client), /结算挑战失败/);
+
+  const del = callsOf('challenges').find((c) => c.method === 'delete');
+  assert.ok(del, 'RPC 失败后应删除插入的挑战');
+  const idEq = callsOf('challenges').find((c) => c.method === 'eq' && c.args[0] === 'id');
+  assert.equal(idEq?.args[1], 'cX', '应按插入的 id 删除 pending 行');
+});
+
+test('fetchChallenges 读自己相关的挑战并映射', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    challenges: [
+      { id: 'c1', challenger_user_id: USER, target_user_id: 'u2', status: 'pending', result: null, result_summary: null, created_at: '2020-01-01T00:00:00Z' },
+      { id: 'c2', challenger_user_id: 'u2', target_user_id: USER, status: 'resolved', result: 'challenger_win', result_summary: { result: 'challenger_win' }, created_at: '2020-01-02T00:00:00Z' },
+    ],
+  });
+  const list = await fetchChallenges(USER, client);
+  assert.equal(list.length, 2);
+  assert.deepEqual(list[0], {
+    id: 'c1',
+    challengerUserId: USER,
+    targetUserId: 'u2',
+    status: 'pending',
+    result: null,
+    resultSummary: null,
+    createdAt: '2020-01-01T00:00:00.000Z',
+  });
+  assert.equal(list[1].result, 'challenger_win');
+  assert.deepEqual(list[1].resultSummary, { result: 'challenger_win' });
+  assert.ok(callsOf('challenges').some((c) => c.method === 'or'), '应按或条件过滤双方');
 });

@@ -299,7 +299,7 @@ export async function fetchWorld(
     if (unitErr) throw new Error(`读取部队失败：${unitErr.message}`);
     const troopCount = (unitRows ?? []).reduce((sum, u) => sum + (u.count ?? 0), 0);
     const march = await fetchActiveMarch(r.id, client);
-    // 同 cities：RLS 的 generals_select 仅返回本人武将，side 恒为 'me'，'enemy' 不可达。
+    // 共享世界：generals_select 对所有登录用户可见（不只本人），故 side 依归属区分 me/enemy。
     armies.push({
       id: r.id,
       generalName: r.name,
@@ -440,6 +440,97 @@ export async function leaveGuild(
     .eq('guild_id', guildId)
     .eq('user_id', userId);
   if (error) throw new Error(`退出军团失败：${error.message}`);
+}
+
+// ---------------------------------------------------------------------------
+// PvP 挑战
+// ---------------------------------------------------------------------------
+
+/** PvP 挑战领域对象。camelCase 字段映射 challenges 表 snake_case 列。 */
+export interface Challenge {
+  id: string;
+  challengerUserId: string;
+  targetUserId: string;
+  status: string;
+  result: string | null;
+  /** 结算摘要（战力/战损/胜负），由 resolve_pvp 写入；pending 行为 null。 */
+  resultSummary: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+/**
+ * 发起 1v1 PvP 挑战：先落一条 pending 挑战（RLS 要求挑战者本人插入），
+ * 再调 resolve_pvp（SECURITY DEFINER）做服务器权威结算，由该 RPC 复用/结算挑战。
+ * 挑战需 target_user_id 落库，故先从 generals 反查目标武将的归属用户。
+ */
+export async function initiateChallenge(
+  userId: string,
+  challengerGeneralId: string,
+  targetGeneralId: string,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { data: target, error: tErr } = await client
+    .from('generals')
+    .select('user_id')
+    .eq('id', targetGeneralId)
+    .maybeSingle();
+  if (tErr) throw new Error(`发起挑战失败：${tErr.message}`);
+  if (!target) throw new Error('发起挑战失败：目标武将不存在');
+
+  const { data: inserted, error } = await client
+    .from('challenges')
+    .insert({
+      id: crypto.randomUUID(),
+      challenger_user_id: userId,
+      target_user_id: target.user_id,
+      challenger_general_id: challengerGeneralId,
+      target_general_id: targetGeneralId,
+      status: 'pending',
+    })
+    .select('id')
+    .single();
+  if (error) throw new Error(`发起挑战失败：${error.message}`);
+  const insertedId = inserted?.id;
+
+  const { error: rpcErr } = await client.rpc('resolve_pvp', {
+    p_challenger_general_id: challengerGeneralId,
+    p_target_general_id: targetGeneralId,
+  });
+  if (rpcErr) {
+    // RPC 失败时回滚刚插入的 pending 行，避免孤儿挑战一直出现在挑战列表。
+    // RLS 允许本人删除自己插入的挑战，删除失败则放弃（best-effort），照常抛原始 RPC 错误。
+    if (insertedId) {
+      // 回滚 pending 行：RLS 允许本人删除自己插入的挑战（challenges_delete 策略）。
+      // 删除失败不掩盖原始 RPC 错误，仅告警（best-effort），避免静默吞掉回滚失败。
+      const { error: delErr } = await client.from('challenges').delete().eq('id', insertedId);
+      if (delErr) {
+        console.warn(`回滚失败：无法删除挑战 ${insertedId}：${delErr.message}`);
+      }
+    }
+    throw new Error(`结算挑战失败：${rpcErr.message}`);
+  }
+}
+
+/** 读取与本人相关（作为挑战者或被挑战者）的挑战，按创建时间倒序。 */
+export async function fetchChallenges(
+  userId: string,
+  client: SupabaseClient = supabase,
+): Promise<Challenge[]> {
+  const { data, error } = await client
+    .from('challenges')
+    .select('id,challenger_user_id,target_user_id,status,result,result_summary,created_at')
+    .or(`challenger_user_id.eq.${userId},target_user_id.eq.${userId}`)
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(`读取挑战失败：${error.message}`);
+  return (data ?? []).map((r) => ({
+    id: r.id,
+    challengerUserId: r.challenger_user_id,
+    targetUserId: r.target_user_id,
+    status: r.status,
+    result: r.result,
+    resultSummary: (r.result_summary as Record<string, unknown> | null) ?? null,
+    createdAt: new Date(r.created_at).toISOString(),
+  }));
 }
 
 // ---------------------------------------------------------------------------
