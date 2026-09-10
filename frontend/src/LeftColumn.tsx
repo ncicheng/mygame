@@ -50,9 +50,17 @@ export function LeftColumn({
   };
   const saveName = () => {
     const trimmed = nameDraft.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      // 空输入不做保存，直接退出编辑态（并提供「取消」可随时返回展示态）
+      setEditingName(false);
+      return;
+    }
     onSetNickname(trimmed);
     setEditingName(false);
+  };
+  const cancelEditName = () => {
+    setEditingName(false);
+    setNameDraft(nickname ?? '');
   };
 
   // 昵称卡：展示昵称 + 「修改」入口，编辑态提供输入与保存
@@ -71,6 +79,9 @@ export function LeftColumn({
             />
             <button type="button" className="mg-btn ghost" onClick={saveName}>
               保存
+            </button>
+            <button type="button" className="mg-btn ghost" onClick={cancelEditName}>
+              取消
             </button>
           </>
         ) : (
