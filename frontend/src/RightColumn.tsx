@@ -7,6 +7,10 @@ interface RightColumnProps {
   /** 当前玩家 id（用于判定盟主本人 / 控制退出按钮） */
   userId: string;
   resources: Resources | null;
+  /** 领地大小（拥有城池数） */
+  territory: number;
+  /** 军团成员 user_id → 昵称 */
+  memberNicknames: Record<string, string | null>;
   reports: BattleReport[];
   /** PvP 挑战列表（与本人相关的挑战，按时间倒序） */
   challenges: Challenge[];
@@ -33,6 +37,8 @@ interface RightColumnProps {
 export function RightColumn({
   userId,
   resources,
+  territory,
+  memberNicknames,
   reports,
   challenges,
   quests,
@@ -62,6 +68,7 @@ export function RightColumn({
         <div className="trow"><span>铁材</span><span className="n">{res.iron.toLocaleString()}</span></div>
         <div className="trow"><span>稀有材料</span><span className="n">{res.rare.toLocaleString()}</span></div>
         <div className="trow"><span>金币</span><span className="n">{res.gold.toLocaleString()}</span></div>
+        <div className="trow"><span>领地</span><span className="n">{territory} 城</span></div>
       </section>
 
       <section className="card">
@@ -142,7 +149,7 @@ export function RightColumn({
             </div>
             {members.map((m) => (
               <div className="trow" key={m.userId}>
-                <span>{m.userId === myGuild.leaderUserId ? '👑' : '⚔'} {m.userId}</span>
+                <span>{m.userId === myGuild.leaderUserId ? '👑' : '⚔'} {memberNicknames[m.userId] ?? m.userId}</span>
               </div>
             ))}
             {myGuild.leaderUserId !== userId && (
