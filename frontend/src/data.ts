@@ -130,6 +130,35 @@ export async function fetchProtection(
   return { peaceProtectionUntil: data?.peace_protection_until ?? null };
 }
 
+/** 读取玩家昵称（profiles.username）；无建档或无昵称返回 null。 */
+export async function fetchNickname(
+  userId: string,
+  client: SupabaseClient = supabase,
+): Promise<string | null> {
+  const { data, error } = await client
+    .from('profiles')
+    .select('username')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw new Error(`读取昵称失败：${error.message}`);
+  return data?.username ?? null;
+}
+
+/** 统计某用户在某世界拥有的城池数（领地数）。 */
+export async function fetchTerritory(
+  userId: string,
+  worldId: string,
+  client: SupabaseClient = supabase,
+): Promise<number> {
+  const { count, error } = await client
+    .from('cities')
+    .select('id', { count: 'exact', head: true })
+    .eq('owner_user_id', userId)
+    .eq('world_id', worldId);
+  if (error) throw new Error(`读取领地失败：${error.message}`);
+  return count ?? 0;
+}
+
 /** 读取玩家已解锁的最高兵种等级（未建档则取初始解锁值）。 */
 export async function fetchTroopMaxUnlocked(
   userId: string,
@@ -884,6 +913,18 @@ async function applyUnitLosses(
 // ---------------------------------------------------------------------------
 // 养成
 // ---------------------------------------------------------------------------
+
+/** 设置昵称：按 user_id 幂等 upsert profiles（存量无行也能写入）。 */
+export async function setNickname(
+  userId: string,
+  nickname: string,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client
+    .from('profiles')
+    .upsert({ user_id: userId, username: nickname }, { onConflict: 'user_id' });
+  if (error) throw new Error(`设置昵称失败：${error.message}`);
+}
 
 /** 兵种解锁：upsert 玩家养成进度（幂等，存量无行也能写入）。 */
 export async function unlockTroop(

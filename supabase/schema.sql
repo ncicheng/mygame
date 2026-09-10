@@ -280,9 +280,10 @@ ALTER TABLE battle_reports ENABLE ROW LEVEL SECURITY;
 -- RLS 策略
 -- =============================================================
 
--- ---------------- profiles（仅本人） ----------------
+-- ---------------- profiles（登录用户可见昵称；读写仅本人） ----------------
+-- 放开 SELECT：登录用户即可读全部昵称（军团成员间互看昵称），但 INSERT/UPDATE/DELETE 仍限本人。
 CREATE POLICY profiles_select ON profiles
-  FOR SELECT USING (auth.uid() = user_id);
+  FOR SELECT USING (auth.uid() IS NOT NULL);
 CREATE POLICY profiles_insert ON profiles
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY profiles_update ON profiles
@@ -549,6 +550,9 @@ DECLARE
   v_off integer;
   v_occupied boolean;
 BEGIN
+  -- 0. 播种昵称：默认「玩家 + id 前 6 位」（profiles.username UNIQUE，id 前缀保证唯一性）
+  INSERT INTO profiles (user_id, username) VALUES (NEW.id, '玩家' || left(NEW.id::text, 6));
+
   -- 1. 确定世界：复用最早存在的世界，否则新建默认世界
   SELECT id INTO v_world_id FROM worlds ORDER BY created_at, id LIMIT 1;
   IF v_world_id IS NULL THEN

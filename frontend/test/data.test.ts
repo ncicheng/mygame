@@ -27,6 +27,9 @@ import {
   fetchChallenges,
   fetchProtection,
   refreshWildlands,
+  fetchNickname,
+  setNickname,
+  fetchTerritory,
 } from '../src/data.js';
 import type { CombatResult, CombatUnit } from '@mygame/shared';
 
@@ -97,10 +100,10 @@ function makeFakeSupabase(
       onR: (e: unknown) => unknown,
     ): Promise<unknown> => {
       const raw = perTable[table];
-      const resolved: { data: unknown; error?: { message: string } | null } = Array.isArray(raw)
+      const resolved: { data: unknown; error?: { message: string } | null; count?: number | null } = Array.isArray(raw)
         ? { data: raw }
         : raw && typeof raw === 'object' && 'data' in raw
-          ? (raw as { data: unknown; error?: { message: string } | null })
+          ? (raw as { data: unknown; error?: { message: string } | null; count?: number | null })
           : { data: raw };
       let data = resolved.data;
       const usedSingle = calls.some((c) => c.method === 'single' || c.method === 'maybeSingle');
@@ -108,7 +111,7 @@ function makeFakeSupabase(
         data = data[0];
       }
       order.push(table);
-      return Promise.resolve({ data, error: resolved.error ?? null }).then(onF, onR);
+      return Promise.resolve({ data, count: resolved.count ?? null, error: resolved.error ?? null }).then(onF, onR);
     };
     return q;
   };
@@ -656,4 +659,69 @@ test('refreshWildlands 失败时抛中文 Error', async () => {
     rpc: { data: null, error: { message: 'boom' } },
   });
   await assert.rejects(() => refreshWildlands('w1', client), /刷新野地失败/);
+});
+
+test('fetchNickname 读取 profiles 的 username', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    profiles: [{ username: '玩家123456' }],
+  });
+  assert.equal(await fetchNickname(USER, client), '玩家123456');
+  const sel = callsOf('profiles').find((c) => c.method === 'select');
+  assert.ok(sel, '应读取 profiles');
+  assert.deepEqual(sel!.args[0], 'username');
+  assert.ok(callsOf('profiles').some((c) => c.method === 'eq' && c.args[0] === 'user_id' && c.args[1] === USER));
+});
+
+test('fetchNickname 无 profile 行时返回 null', async () => {
+  const { client } = makeFakeSupabase({
+    profiles: [],
+  });
+  assert.equal(await fetchNickname(USER, client), null);
+});
+
+test('fetchNickname 失败时抛中文 Error', async () => {
+  const { client } = makeFakeSupabase({
+    profiles: { data: null, error: { message: 'no rows' } },
+  });
+  await assert.rejects(() => fetchNickname(USER, client), /读取昵称失败/);
+});
+
+test('setNickname 通过 upsert 写入 profiles', async () => {
+  const { client, callsOf } = makeFakeSupabase({});
+  await setNickname(USER, '新昵称', client);
+  const ups = callsOf('profiles').find((c) => c.method === 'upsert');
+  assert.ok(ups, '应调用 profiles.upsert');
+  assert.deepEqual(ups!.args[0], { user_id: USER, username: '新昵称' });
+  assert.deepEqual(ups!.args[1], { onConflict: 'user_id' });
+});
+
+test('setNickname 失败时抛中文 Error', async () => {
+  const { client } = makeFakeSupabase({
+    profiles: { data: null, error: { message: 'duplicate' } },
+  });
+  await assert.rejects(() => setNickname(USER, '新昵称', client), /设置昵称失败/);
+});
+
+test('fetchTerritory 统计该用户拥有的城池数', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    cities: { data: null, count: 3, error: null },
+  });
+  assert.equal(await fetchTerritory(USER, 'w1', client), 3);
+  assert.ok(callsOf('cities').some((c) => c.method === 'select'));
+  assert.ok(callsOf('cities').some((c) => c.method === 'eq' && c.args[0] === 'owner_user_id' && c.args[1] === USER));
+  assert.ok(callsOf('cities').some((c) => c.method === 'eq' && c.args[0] === 'world_id' && c.args[1] === 'w1'));
+});
+
+test('fetchTerritory 无城池时返回 0', async () => {
+  const { client } = makeFakeSupabase({
+    cities: { data: null, count: 0, error: null },
+  });
+  assert.equal(await fetchTerritory(USER, 'w1', client), 0);
+});
+
+test('fetchTerritory 失败时抛中文 Error', async () => {
+  const { client } = makeFakeSupabase({
+    cities: { data: null, error: { message: 'boom' } },
+  });
+  await assert.rejects(() => fetchTerritory(USER, 'w1', client), /读取领地失败/);
 });
