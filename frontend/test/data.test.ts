@@ -25,6 +25,7 @@ import {
   leaveGuild,
   initiateChallenge,
   fetchChallenges,
+  fetchProtection,
 } from '../src/data.js';
 import type { CombatResult, CombatUnit } from '@mygame/shared';
 
@@ -613,4 +614,23 @@ test('fetchChallenges 读自己相关的挑战并映射', async () => {
   assert.equal(list[1].result, 'challenger_win');
   assert.deepEqual(list[1].resultSummary, { result: 'challenger_win' });
   assert.ok(callsOf('challenges').some((c) => c.method === 'or'), '应按或条件过滤双方');
+});
+
+test('fetchProtection 读取 progression 的 peace_protection_until', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    progression: [{ peace_protection_until: '2030-01-01T00:00:00Z' }],
+  });
+  const p = await fetchProtection(USER, client);
+  assert.deepEqual(p, { peaceProtectionUntil: '2030-01-01T00:00:00Z' });
+  const sel = callsOf('progression').find((c) => c.method === 'select');
+  assert.ok(sel, '应读取 progression');
+  assert.deepEqual(sel!.args[0], 'peace_protection_until');
+  assert.ok(callsOf('progression').some((c) => c.method === 'eq' && c.args[0] === 'user_id' && c.args[1] === USER));
+});
+
+test('fetchProtection 无 progression 行时返回 null', async () => {
+  const { client } = makeFakeSupabase({
+    progression: [],
+  });
+  assert.deepEqual(await fetchProtection(USER, client), { peaceProtectionUntil: null });
 });

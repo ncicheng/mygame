@@ -107,6 +107,16 @@
   gap: 6px;
 }
 
+.vc .card.peace-banner {
+  border-color: var(--mg-line);
+  background: linear-gradient(135deg, rgba(64, 200, 180, 0.18), rgba(64, 200, 180, 0.05));
+}
+
+.vc .card.peace-banner .trow span {
+  color: var(--mg-gold);
+  font-weight: 600;
+}
+
 .vc .gcard {
   display: flex;
   gap: 10px;

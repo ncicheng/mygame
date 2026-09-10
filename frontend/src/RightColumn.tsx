@@ -13,6 +13,8 @@ interface RightColumnProps {
   quests: QuestState;
   /** 点击某条战报时打开战斗回放 */
   onOpenReport(report: BattleReport): void;
+  /** 免战期截止时间（ISO 字符串）；null 表示无免战期 */
+  peaceProtectionUntil: string | null;
   /** 当前玩家所属军团；null 表示未加入任何军团 */
   myGuild: Guild | null;
   /** 可加入的军团列表（无军团时展示） */
@@ -35,6 +37,7 @@ export function RightColumn({
   challenges,
   quests,
   onOpenReport,
+  peaceProtectionUntil,
   myGuild,
   guilds,
   members,
@@ -43,8 +46,16 @@ export function RightColumn({
   onLeaveGuild,
 }: RightColumnProps) {
   const res = resources ?? { food: 0, iron: 0, rare: 0, gold: 0 };
+  const protectionLeft = formatProtectionRemaining(peaceProtectionUntil);
   return (
     <>
+      {protectionLeft && (
+        <section className="card peace-banner">
+          <div className="trow">
+            <span>🕊 免战期剩余 {protectionLeft}</span>
+          </div>
+        </section>
+      )}
       <section className="card">
         <h4>🗺 资源</h4>
         <div className="trow"><span>粮草</span><span className="n">{res.food.toLocaleString()}</span></div>
@@ -207,6 +218,21 @@ function challengeSummary(c: Challenge, userId: string): string | null {
   const myCasualties = iAmChallenger ? attacker.casualties : defender.casualties;
   const theirCasualties = iAmChallenger ? defender.casualties : attacker.casualties;
   return `战力 ${myPower ?? 0} vs ${theirPower ?? 0} · 我方战损 ${myCasualties ?? 0} / 对方战损 ${theirCasualties ?? 0}`;
+}
+
+/** 免战期剩余时间文案；已过期或 null 返回 null（不展示）。 */
+function formatProtectionRemaining(until: string | null): string | null {
+  if (!until) return null;
+  const remainMs = new Date(until).getTime() - Date.now();
+  if (remainMs <= 0) return null;
+  const totalSec = Math.ceil(remainMs / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) {
+    return `${h} 小时 ${String(m).padStart(2, '0')} 分`;
+  }
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
 /** 创建军团的表单：输入名称 + 提交按钮。 */

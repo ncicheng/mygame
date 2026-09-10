@@ -18,6 +18,7 @@ import {
   fetchGuildMembers,
   fetchGuilds,
   fetchMyGuild,
+  fetchProtection,
   fetchReports,
   fetchResources,
   fetchTroopMaxUnlocked,
@@ -101,6 +102,8 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
   const [general, setGeneral] = useState<General | null>(null);
   const [resources, setResources] = useState<Resources | null>(null);
   const [troopMax, setTroopMax] = useState<number>(INITIAL_TROOP_UNLOCK);
+  // 免战期截止时间（ISO 字符串）；null 表示无免战期
+  const [protectionUntil, setProtectionUntil] = useState<string | null>(null);
   // 军团数据：所属军团、可加入列表、成员
   const [myGuild, setMyGuild] = useState<Guild | null>(null);
   const [guilds, setGuilds] = useState<Guild[]>([]);
@@ -114,7 +117,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
   // 世界状态与玩家数据（各取所需，任一失败不拖累整体）
   const refreshAll = useCallback(
     async (showError: boolean) => {
-      const [w, gen, res, max, rep, myG, gs, ch] = await Promise.allSettled([
+      const [w, gen, res, max, rep, myG, gs, ch, prot] = await Promise.allSettled([
         fetchWorld(user.id),
         fetchGeneral(user.id),
         fetchResources(user.id),
@@ -123,6 +126,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
         fetchMyGuild(user.id),
         fetchGuilds(),
         fetchChallenges(user.id),
+        fetchProtection(user.id),
       ]);
       if (w.status === 'fulfilled') {
         setWorld((prev) => mergeActiveMarchPositions(w.value, prev));
@@ -150,6 +154,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
       }
       if (gs.status === 'fulfilled') setGuilds(gs.value);
       if (ch.status === 'fulfilled') setChallenges(ch.value);
+      if (prot.status === 'fulfilled') setProtectionUntil(prot.value.peaceProtectionUntil);
     },
     [user.id],
   );
@@ -528,6 +533,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
               generalLevel: general?.level ?? 1,
             })}
             onOpenReport={setActiveReport}
+            peaceProtectionUntil={protectionUntil}
             myGuild={myGuild}
             guilds={guilds}
             members={guildMembers}
