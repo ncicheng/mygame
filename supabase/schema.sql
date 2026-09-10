@@ -694,6 +694,10 @@ CREATE POLICY challenges_select ON challenges
   FOR SELECT USING (auth.uid() IN (challenger_user_id, target_user_id));
 CREATE POLICY challenges_insert ON challenges
   FOR INSERT WITH CHECK (auth.uid() = challenger_user_id);
+-- 挑战者本人可删除自己的挑战：供 initiateChallenge 在 RPC 结算失败时回滚 pending 行。
+-- 若无此策略，回滚 delete 会被 RLS 拒绝（且错误被吞掉），孤儿挑战无法清理。
+CREATE POLICY challenges_delete ON challenges
+  FOR DELETE USING (auth.uid() = challenger_user_id);
 
 -- =============================================================
 -- 18. 兵种单兵战力表（1-15 级）：供 SECURITY DEFINER RPC 查询
@@ -773,14 +777,92 @@ CREATE POLICY pvp_battle_reports_select ON pvp_battle_reports
 -- 公式镜像 shared/src/combat.ts：
 --   generalMultiplier(level, stars) = 1 + (level-1)*0.05 + (stars-1)*0.10
 --   armyPower = SUM(count × troop_stats.power)
---   weaponBonus = weaponTier × 50（无武器为 0，用原始 tier 而非封顶值）
+--   weaponBonus = cappedWeaponTier × 50（无武器为 0；有效阶由部队最高兵种等级封顶，
+--                与 shared/src/combat.ts 的 effectiveWeaponTier 一致，PvE/PvP 统一）
 --   generalSidePower = generalMultiplier × armyPower + weaponBonus
 --   winProbability = 1/(1+exp(-slope*ln(attacker/defender))), slope=2.0
---   胜方轻损 15%、败方重损 70%（战损 = floor(count×rate)）
+--   胜方轻损 15%、败方重损 70%（战损 = floor(侧总兵数×rate)，按行成比例分配）
 -- 胜负判定：完全均势 → 平局；否则用「双方 id + 挑战 id」哈希做确定性种子，
 -- 模拟 combat.ts 的 mulberry32 种子随机（rand < winProbability）。
 -- 注：plpgsql 函数内不允许显式 COMMIT/ROLLBACK，EXCEPTION 子句会为函数
 -- 主体建立子事务，异常时自动回滚并重抛，保证整体原子性。
+-- 战损分配：先对侧总兵数向下取整（floor(total×rate)，与 combat.ts 一致），
+-- 再按各兵堆占比成比例分配到每行；余数补给小数部分最大的兵堆，保证合计等于总数战损。
+CREATE OR REPLACE FUNCTION allocate_casualties(p_general_id text, p_rate numeric)
+RETURNS integer
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+DECLARE
+  v_ids text[];
+  v_counts integer[];
+  v_lost integer[];
+  v_frac numeric[];
+  v_cap integer[];
+  v_rows integer;
+  v_i integer;
+  v_best integer;
+  v_max_frac numeric;
+  v_total integer;
+  v_total_lost integer;
+  v_sum0 integer := 0;
+  v_remainder integer;
+BEGIN
+  SELECT COALESCE(SUM(count), 0) INTO v_total FROM army_units WHERE general_id = p_general_id;
+  IF v_total <= 0 OR p_rate <= 0 THEN
+    RETURN 0;
+  END IF;
+  v_total_lost := floor(v_total * p_rate)::integer;
+
+  -- 取行并存数组（id 升序保证确定性）
+  SELECT array_agg(id ORDER BY id) INTO v_ids FROM army_units WHERE general_id = p_general_id;
+  SELECT array_agg(count ORDER BY id) INTO v_counts FROM army_units WHERE general_id = p_general_id;
+  v_rows := array_length(v_ids, 1);
+  v_lost := array_fill(0, ARRAY[v_rows]);
+  v_frac := array_fill(0, ARRAY[v_rows])::numeric[];
+  v_cap := array_fill(0, ARRAY[v_rows]);
+
+  -- 第一遍：每行向下取整 + 记录小数部分与剩余兵力
+  FOR v_i IN 1..v_rows LOOP
+    v_lost[v_i] := floor(v_counts[v_i] * p_rate)::integer;
+    v_frac[v_i] := v_counts[v_i] * p_rate - v_lost[v_i];
+    v_cap[v_i] := v_counts[v_i] - v_lost[v_i];
+    v_sum0 := v_sum0 + v_lost[v_i];
+  END LOOP;
+
+  -- 余数 = 总数战损 - 各行向下取整之和（恒 ≥ 0），补给小数部分最大的行
+  v_remainder := v_total_lost - v_sum0;
+  WHILE v_remainder > 0 LOOP
+    v_best := 0;
+    v_max_frac := -1;
+    FOR v_i IN 1..v_rows LOOP
+      IF v_cap[v_i] > 0 AND v_frac[v_i] > v_max_frac THEN
+        v_max_frac := v_frac[v_i];
+        v_best := v_i;
+      END IF;
+    END LOOP;
+    IF v_best = 0 THEN
+      EXIT;
+    END IF;
+    v_lost[v_best] := v_lost[v_best] + 1;
+    v_cap[v_best] := v_cap[v_best] - 1;
+    v_frac[v_best] := -1;  -- 已补，避免重复选中
+    v_remainder := v_remainder - 1;
+  END LOOP;
+
+  -- 第二遍：落库（战损 ≥ 原数则删行，否则减 count）
+  FOR v_i IN 1..v_rows LOOP
+    IF v_lost[v_i] >= v_counts[v_i] THEN
+      DELETE FROM army_units WHERE id = v_ids[v_i];
+    ELSIF v_lost[v_i] > 0 THEN
+      UPDATE army_units SET count = v_counts[v_i] - v_lost[v_i] WHERE id = v_ids[v_i];
+    END IF;
+  END LOOP;
+
+  RETURN v_total_lost;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION resolve_pvp(
   p_challenger_general_id text,
   p_target_general_id text
@@ -807,6 +889,9 @@ DECLARE
   v_tg_army numeric;
   v_ch_weapon_tier integer;
   v_tg_weapon_tier integer;
+  -- 部队最高兵种等级（用于封顶武器有效阶，镜像 effectiveWeaponTier）
+  v_ch_max_level integer;
+  v_tg_max_level integer;
   v_ch_mult numeric;
   v_tg_mult numeric;
   v_ch_power numeric;
@@ -821,9 +906,15 @@ DECLARE
   v_tg_rate numeric;
   -- 挑战记录
   v_challenge_id text;
-  -- 战损统计
-  v_row record;
-  v_lost integer;
+  -- 防刷：同目标冷却 + 行动点门槛
+  v_last_challenge_at timestamptz;
+  v_ap_current integer;
+  v_ap_max integer;
+  v_ap_last timestamptz;
+  v_ap_elapsed numeric;
+  v_ap_periods integer;
+  v_ap_new_last timestamptz;
+  -- 战损统计（总额，由 allocate_casualties 计算）
   v_ch_casualties integer := 0;
   v_tg_casualties integer := 0;
   -- 战斗记录
@@ -860,6 +951,44 @@ BEGIN
     RAISE EXCEPTION 'resolve_pvp: 目标武将不存在 %', p_target_general_id;
   END IF;
 
+  -- 1a. 自挑战拦截：同一用户麾下的任意武将均不可作为目标（不止相同的 general id）
+  IF v_tg_user = v_caller THEN
+    RAISE EXCEPTION 'resolve_pvp: 不能挑战自己的武将';
+  END IF;
+
+  -- 1b. 防刷：对同一目标用户的挑战设有冷却（60 秒内不可重复），并扣除行动点
+  SELECT created_at INTO v_last_challenge_at
+    FROM challenges
+   WHERE challenger_user_id = v_caller
+     AND target_user_id = v_tg_user
+     AND status IN ('pending', 'resolved')
+   ORDER BY created_at DESC
+   LIMIT 1;
+  IF v_last_challenge_at IS NOT NULL
+     AND now() - v_last_challenge_at < interval '60 seconds' THEN
+    RAISE EXCEPTION 'resolve_pvp: 冷却中，60 秒内不能重复挑战同一目标';
+  END IF;
+
+  -- 行动点门槛与扣除（每 10 分钟恢复 1 点；消耗=ACTION_COSTS.challenge=2，
+  -- 恢复公式镜像 frontend/src/data.ts 的 spendActionPoints，服务器权威防绕过）
+  SELECT current, max, last_recovered_at
+    INTO v_ap_current, v_ap_max, v_ap_last
+    FROM action_points
+   WHERE user_id = v_caller;
+  IF v_ap_current IS NULL THEN
+    RAISE EXCEPTION 'resolve_pvp: 行动力数据不存在';
+  END IF;
+  v_ap_elapsed := EXTRACT(EPOCH FROM (now() - v_ap_last));
+  v_ap_periods := floor(v_ap_elapsed / 600)::integer;  -- 600 秒 = 10 分钟恢复 1 点
+  IF v_ap_current + v_ap_periods < 2 THEN
+    RAISE EXCEPTION 'resolve_pvp: 行动点不足';
+  END IF;
+  v_ap_new_last := v_ap_last + make_interval(secs => v_ap_periods * 600);
+  UPDATE action_points
+     SET current = LEAST(v_ap_max, v_ap_current + v_ap_periods) - 2,
+         last_recovered_at = v_ap_new_last
+   WHERE user_id = v_caller;
+
   -- 2. 复用或新建双方 pending 挑战（同一方向尚无 pending 则补建一条）
   SELECT id INTO v_challenge_id
     FROM challenges
@@ -886,15 +1015,32 @@ BEGIN
     LEFT JOIN troop_stats ts ON ts.soldier_level = u.soldier_level
    WHERE u.general_id = p_target_general_id;
 
-  -- 武器阶
+  -- 武器阶（原始 tier），随后用部队最高兵种等级封顶（effectiveWeaponTier）
   SELECT tier INTO v_ch_weapon_tier FROM weapons WHERE id = v_ch_weapon_id;
   SELECT tier INTO v_tg_weapon_tier FROM weapons WHERE id = v_tg_weapon_id;
+
+  -- 部队最高兵种等级：封顶武器有效阶，防止高阶武器挂低阶兵时 PvP 战力高于 PvE。
+  -- 镜像 shared/src/combat.ts 的 effectiveWeaponTier（无兵或没武器时有效阶为 0）。
+  SELECT COALESCE(MAX(soldier_level), 0) INTO v_ch_max_level
+    FROM army_units WHERE general_id = p_challenger_general_id;
+  SELECT COALESCE(MAX(soldier_level), 0) INTO v_tg_max_level
+    FROM army_units WHERE general_id = p_target_general_id;
+  IF v_ch_weapon_tier IS NOT NULL AND v_ch_max_level > 0 THEN
+    v_ch_weapon_tier := LEAST(v_ch_weapon_tier, v_ch_max_level);
+  ELSE
+    v_ch_weapon_tier := NULL;
+  END IF;
+  IF v_tg_weapon_tier IS NOT NULL AND v_tg_max_level > 0 THEN
+    v_tg_weapon_tier := LEAST(v_tg_weapon_tier, v_tg_max_level);
+  ELSE
+    v_tg_weapon_tier := NULL;
+  END IF;
 
   -- generalMultiplier = 1 + (level-1)*0.05 + (stars-1)*0.10
   v_ch_mult := 1 + (v_ch_level - 1) * 0.05 + (v_ch_stars - 1) * 0.10;
   v_tg_mult := 1 + (v_tg_level - 1) * 0.05 + (v_tg_stars - 1) * 0.10;
 
-  -- generalSidePower = multiplier × armyPower + weaponBonus（每阶 +50，用原始 tier）
+  -- generalSidePower = multiplier × armyPower + weaponBonus（每阶 +50，用封顶后的有效阶）
   v_ch_power := v_ch_mult * v_ch_army + COALESCE(v_ch_weapon_tier, 0) * 50;
   v_tg_power := v_tg_mult * v_tg_army + COALESCE(v_tg_weapon_tier, 0) * 50;
 
@@ -937,25 +1083,10 @@ BEGIN
     v_tg_rate := 0.15;
   END IF;
 
-  -- 逐堆结算双方战损：count = count - floor(count×rate)，归零则删除
-  FOR v_row IN SELECT id, count FROM army_units WHERE general_id = p_challenger_general_id LOOP
-    v_lost := floor(v_row.count * v_ch_rate)::integer;
-    v_ch_casualties := v_ch_casualties + v_lost;
-    IF (v_row.count - v_lost) <= 0 THEN
-      DELETE FROM army_units WHERE id = v_row.id;
-    ELSE
-      UPDATE army_units SET count = v_row.count - v_lost WHERE id = v_row.id;
-    END IF;
-  END LOOP;
-  FOR v_row IN SELECT id, count FROM army_units WHERE general_id = p_target_general_id LOOP
-    v_lost := floor(v_row.count * v_tg_rate)::integer;
-    v_tg_casualties := v_tg_casualties + v_lost;
-    IF (v_row.count - v_lost) <= 0 THEN
-      DELETE FROM army_units WHERE id = v_row.id;
-    ELSE
-      UPDATE army_units SET count = v_row.count - v_lost WHERE id = v_row.id;
-    END IF;
-  END LOOP;
+  -- 6b. 战损：对「侧总兵数」向下取整后按各兵堆占比成比例分配（与 combat.ts 一致，
+  --     而非逐行向下取整）。allocate_casualties 返回该侧总战损（= floor(总数×战损率)）。
+  v_ch_casualties := allocate_casualties(p_challenger_general_id, v_ch_rate);
+  v_tg_casualties := allocate_casualties(p_target_general_id, v_tg_rate);
 
   -- 7. 写 PvP 战斗记录 + 双方战报（每名玩家各一条）
   v_ch_power_int := round(v_ch_power)::integer;

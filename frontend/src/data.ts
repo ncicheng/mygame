@@ -299,7 +299,7 @@ export async function fetchWorld(
     if (unitErr) throw new Error(`读取部队失败：${unitErr.message}`);
     const troopCount = (unitRows ?? []).reduce((sum, u) => sum + (u.count ?? 0), 0);
     const march = await fetchActiveMarch(r.id, client);
-    // 同 cities：RLS 的 generals_select 仅返回本人武将，side 恒为 'me'，'enemy' 不可达。
+    // 共享世界：generals_select 对所有登录用户可见（不只本人），故 side 依归属区分 me/enemy。
     armies.push({
       id: r.id,
       generalName: r.name,
@@ -500,7 +500,12 @@ export async function initiateChallenge(
     // RPC 失败时回滚刚插入的 pending 行，避免孤儿挑战一直出现在挑战列表。
     // RLS 允许本人删除自己插入的挑战，删除失败则放弃（best-effort），照常抛原始 RPC 错误。
     if (insertedId) {
-      await client.from('challenges').delete().eq('id', insertedId);
+      // 回滚 pending 行：RLS 允许本人删除自己插入的挑战（challenges_delete 策略）。
+      // 删除失败不掩盖原始 RPC 错误，仅告警（best-effort），避免静默吞掉回滚失败。
+      const { error: delErr } = await client.from('challenges').delete().eq('id', insertedId);
+      if (delErr) {
+        console.warn(`回滚失败：无法删除挑战 ${insertedId}：${delErr.message}`);
+      }
     }
     throw new Error(`结算挑战失败：${rpcErr.message}`);
   }

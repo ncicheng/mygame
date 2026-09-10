@@ -164,8 +164,8 @@ export const AP_MAX = 5;
 /** 行动点恢复周期：每 10 分钟恢复 1 点 */
 export const AP_RECOVER_MS = 10 * 60 * 1000;
 
-/** 行动点消耗规则（出征/招募/打野/攻城），招募 Task 4 起使用 */
-export const ACTION_COSTS = { march: 1, recruit: 1, bandit: 2, siege: 3 } as const;
+/** 行动点消耗规则（出征/招募/打野/攻城/挑战），招募 Task 4 起使用 */
+export const ACTION_COSTS = { march: 1, recruit: 1, bandit: 2, siege: 3, challenge: 2 } as const;
 
 /** 打野一次完整消耗：出征（行军）1 + 战斗 2 = 3 行动点。前端打野按钮据此置灰，
  * 避免行动点在 2~3 之间时出征成功但战斗扣点失败（best-effort 仍结算）的断头体验。 */
