@@ -18,11 +18,14 @@ import {
   fetchGuildMembers,
   fetchGuilds,
   fetchMyGuild,
+  fetchNickname,
   fetchProtection,
   fetchReports,
   fetchResources,
+  fetchTerritory,
   fetchTroopMaxUnlocked,
   fetchWorld,
+  setNickname,
   finalizeMarch,
   initiateChallenge,
   joinGuild,
@@ -108,6 +111,11 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
   const [myGuild, setMyGuild] = useState<Guild | null>(null);
   const [guilds, setGuilds] = useState<Guild[]>([]);
   const [guildMembers, setGuildMembers] = useState<GuildMember[]>([]);
+  // 玩家昵称与领地（城池数）
+  const [nickname, setNicknameState] = useState<string | null>(null);
+  const [territory, setTerritory] = useState(0);
+  // 军团成员 user_id → 昵称
+  const [memberNicknames, setMemberNicknames] = useState<Record<string, string | null>>({});
   const worldRef = useRef<WorldStateResponse | null>(null);
   const pendingBattleRef = useRef(false);
   const lastAutoReportRef = useRef<string | null>(null);
@@ -117,7 +125,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
   // 世界状态与玩家数据（各取所需，任一失败不拖累整体）
   const refreshAll = useCallback(
     async (showError: boolean) => {
-      const [w, gen, res, max, rep, myG, gs, ch, prot] = await Promise.allSettled([
+      const [w, gen, res, max, rep, myG, gs, ch, prot, nick] = await Promise.allSettled([
         fetchWorld(user.id),
         fetchGeneral(user.id),
         fetchResources(user.id),
@@ -127,9 +135,16 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
         fetchGuilds(),
         fetchChallenges(user.id),
         fetchProtection(user.id),
+        fetchNickname(user.id),
       ]);
       if (w.status === 'fulfilled') {
         setWorld((prev) => mergeActiveMarchPositions(w.value, prev));
+        // 领地数依赖世界 id，须待 fetchWorld 返回后再查；失败静默（非关键）
+        try {
+          setTerritory(await fetchTerritory(user.id, w.value.world.id));
+        } catch {
+          setTerritory(0);
+        }
       } else if (showError) {
         setError(w.reason instanceof Error ? w.reason.message : String(w.reason));
       }
@@ -145,16 +160,28 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
           try {
             const mem = await fetchGuildMembers(myG.value.id);
             setGuildMembers(mem);
+            // 批量拉取各成员昵称（Promise.all），任一失败静默降级为原始 id
+            const entries = await Promise.all(
+              mem.map((m) => fetchNickname(m.userId).catch(() => null)),
+            );
+            const map: Record<string, string | null> = {};
+            mem.forEach((m, i) => {
+              map[m.userId] = entries[i];
+            });
+            setMemberNicknames(map);
           } catch {
             setGuildMembers([]);
+            setMemberNicknames({});
           }
         } else {
           setGuildMembers([]);
+          setMemberNicknames({});
         }
       }
       if (gs.status === 'fulfilled') setGuilds(gs.value);
       if (ch.status === 'fulfilled') setChallenges(ch.value);
       if (prot.status === 'fulfilled') setProtectionUntil(prot.value.peaceProtectionUntil);
+      if (nick.status === 'fulfilled') setNicknameState(nick.value);
     },
     [user.id],
   );
@@ -372,9 +399,21 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
     void refreshAll(false);
   }, [refreshAll]);
 
-  // 军团操作：调用 data.ts 后刷新军团数据
-  const handleCreateGuild = useCallback(
+  // 设置昵称：调用 data.ts 后刷新玩家数据
+  const handleSetNickname = useCallback(
     async (name: string) => {
+      try {
+        await setNickname(user.id, name);
+        await refreshAll(false);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [user.id, refreshAll],
+  );
+
+  // 军团操作：调用 data.ts 后刷新军团数据
+  const handleCreateGuild = useCallback(    async (name: string) => {
       try {
         await createGuild(user.id, name);
         await refreshAll(false);
@@ -453,7 +492,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
       <header className="vc-top">
         <h1 className="mg-title">⚔ MyGame 指挥台</h1>
         <span className="pl">
-          {user.email ?? user.id} · Lv.{general?.level ?? 1}
+          {nickname ?? user.email ?? user.id} · Lv.{general?.level ?? 1}
         </span>
         <span className="ap">
           行动点 {world.actionPoints.current}/{world.actionPoints.max}
@@ -466,6 +505,8 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
         <aside className="col">
           <LeftColumn
             userId={user.id}
+            nickname={nickname}
+            onSetNickname={(name) => void handleSetNickname(name)}
             general={general}
             rare={resources?.rare ?? 0}
             troopMaxUnlocked={troopMax}
@@ -522,6 +563,8 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
           <RightColumn
             userId={user.id}
             resources={resources}
+            territory={territory}
+            memberNicknames={memberNicknames}
             reports={reports}
             challenges={challenges}
             quests={computeQuests({

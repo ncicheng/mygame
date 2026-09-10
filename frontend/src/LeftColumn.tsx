@@ -15,6 +15,10 @@ import { levelUpGeneral, starUpGeneral, unlockTroop, upgradeWeapon } from './gam
 
 interface LeftColumnProps {
   userId: string;
+  /** 玩家昵称；null 表示尚未设置 */
+  nickname: string | null;
+  /** 保存昵称：由上层调用 setNickname 并刷新 */
+  onSetNickname(name: string): void;
   general: General | null;
   /** 稀有材料余额（用于按钮置灰与成本展示） */
   rare: number;
@@ -24,13 +28,81 @@ interface LeftColumnProps {
   onChanged(): void;
 }
 
-/** 左卡片栏：武将卡 + 部队编成卡 + 养成卡（升级/强化/解锁按钮 + 进度条） */
-export function LeftColumn({ userId, general, rare, troopMaxUnlocked, onChanged }: LeftColumnProps) {
+/** 左卡片栏：昵称卡 + 武将卡 + 部队编成卡 + 养成卡（升级/强化/解锁按钮 + 进度条） */
+export function LeftColumn({
+  userId,
+  nickname,
+  onSetNickname,
+  general,
+  rare,
+  troopMaxUnlocked,
+  onChanged,
+}: LeftColumnProps) {
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+
+  // 昵称编辑：进入编辑态时以当前昵称为草稿
+  const startEditName = () => {
+    setEditingName(true);
+    setNameDraft(nickname ?? '');
+  };
+  const saveName = () => {
+    const trimmed = nameDraft.trim();
+    if (!trimmed) {
+      // 空输入不做保存，直接退出编辑态（并提供「取消」可随时返回展示态）
+      setEditingName(false);
+      return;
+    }
+    onSetNickname(trimmed);
+    setEditingName(false);
+  };
+  const cancelEditName = () => {
+    setEditingName(false);
+    setNameDraft(nickname ?? '');
+  };
+
+  // 昵称卡：展示昵称 + 「修改」入口，编辑态提供输入与保存
+  const nicknameCard = (
+    <section className="card">
+      <h4>🪪 昵称</h4>
+      <div className="trow">
+        {editingName ? (
+          <>
+            <input
+              className="mg-input"
+              placeholder="输入昵称"
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && saveName()}
+            />
+            <button type="button" className="mg-btn ghost" onClick={saveName}>
+              保存
+            </button>
+            <button type="button" className="mg-btn ghost" onClick={cancelEditName}>
+              取消
+            </button>
+          </>
+        ) : (
+          <>
+            <span>{nickname ?? '未设置昵称'}</span>
+            <button type="button" className="mg-btn ghost" onClick={startEditName}>
+              修改
+            </button>
+          </>
+        )}
+      </div>
+    </section>
+  );
 
   if (!general) {
-    return <section className="card">尚无武将</section>;
+    return (
+      <>
+        {nicknameCard}
+        <section className="card">尚无武将</section>
+      </>
+    );
   }
   const troopCount = general.army.reduce((sum, unit) => sum + unit.count, 0);
   const weaponTier = general.weapon?.tier ?? 0;
@@ -62,6 +134,7 @@ export function LeftColumn({ userId, general, rare, troopMaxUnlocked, onChanged 
 
   return (
     <>
+      {nicknameCard}
       <section className="card gcard">
         <div className="portrait">🏮</div>
         <div className="meta">

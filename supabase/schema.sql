@@ -280,9 +280,10 @@ ALTER TABLE battle_reports ENABLE ROW LEVEL SECURITY;
 -- RLS 策略
 -- =============================================================
 
--- ---------------- profiles（仅本人） ----------------
+-- ---------------- profiles（登录用户可见昵称；读写仅本人） ----------------
+-- 放开 SELECT：登录用户即可读全部昵称（军团成员间互看昵称），但 INSERT/UPDATE/DELETE 仍限本人。
 CREATE POLICY profiles_select ON profiles
-  FOR SELECT USING (auth.uid() = user_id);
+  FOR SELECT USING (auth.uid() IS NOT NULL);
 CREATE POLICY profiles_insert ON profiles
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY profiles_update ON profiles
@@ -549,6 +550,15 @@ DECLARE
   v_off integer;
   v_occupied boolean;
 BEGIN
+  -- 0. 播种昵称：默认「玩家 + id 前 6 位」（profiles.username UNIQUE）
+  --    默认昵称仅 6 位十六进制（约 1600 万种），极端并发下可能撞唯一键。
+  --    用嵌套子块隔离：即便撞键也只是丢弃默认昵称并继续，不影响后续世界/资源等全部种子。
+  BEGIN
+    INSERT INTO profiles (user_id, username) VALUES (NEW.id, '玩家' || left(NEW.id::text, 6));
+  EXCEPTION WHEN unique_violation THEN
+    RAISE WARNING 'seed_new_user: profiles 昵称撞唯一键，已跳过默认昵称 user=%', NEW.id;
+  END;
+
   -- 1. 确定世界：复用最早存在的世界，否则新建默认世界
   SELECT id INTO v_world_id FROM worlds ORDER BY created_at, id LIMIT 1;
   IF v_world_id IS NULL THEN

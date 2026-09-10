@@ -15,6 +15,24 @@ UPDATE progression
    SET peace_protection_until = now() + interval '24 hours'
  WHERE peace_protection_until IS NULL;
 
+-- =============================================================
+-- 昵称：与 schema.sql 保持一致
+-- =============================================================
+-- profiles SELECT 放开：登录用户即可读全部昵称（军团成员间互看昵称）。
+-- 注意：schema.sql 里 seed_new_user 在建号时播种昵称；upgrade.sql 不重定义该触发器，
+-- 故对升级前已存在的用户用下方幂等 INSERT 回填 profiles 行。
+-- 默认昵称仅 6 位十六进制（约 1600 万种），极端并发下可能撞唯一键，故用 ON CONFLICT 跳过。
+DROP POLICY IF EXISTS profiles_select ON profiles;
+CREATE POLICY profiles_select ON profiles
+  FOR SELECT USING (auth.uid() IS NOT NULL);
+
+-- 为既有老用户补发昵称（幂等：仅补缺行，撞唯一键则跳过，不覆盖已有昵称）
+INSERT INTO profiles (user_id, username)
+SELECT u.id, '玩家' || left(u.id::text, 6)
+  FROM auth.users u
+ WHERE NOT EXISTS (SELECT 1 FROM profiles p WHERE p.user_id = u.id)
+ON CONFLICT (user_id) DO NOTHING;
+
 -- [1] RLS：开放 generals/cities 共享可见
 DROP POLICY IF EXISTS generals_select ON generals;
 CREATE POLICY generals_select ON generals
