@@ -224,6 +224,8 @@ function challengeSummary(c: Challenge, userId: string): string | null {
 function formatProtectionRemaining(until: string | null): string | null {
   if (!until) return null;
   const remainMs = new Date(until).getTime() - Date.now();
+  // 无效时间戳会得到 NaN，直接跳过展示，避免渲染 "NaN:NaN"
+  if (Number.isNaN(remainMs)) return null;
   if (remainMs <= 0) return null;
   const totalSec = Math.ceil(remainMs / 1000);
   const h = Math.floor(totalSec / 3600);
