@@ -116,6 +116,20 @@ export async function fetchGeneral(
   return { id: g.id, name: g.name, level: g.level, stars: g.stars ?? 1, weapon, army };
 }
 
+/** 读取玩家免战期截止时间；无建档或无免战期返回 null。 */
+export async function fetchProtection(
+  userId: string,
+  client: SupabaseClient = supabase,
+): Promise<{ peaceProtectionUntil: string | null }> {
+  const { data, error } = await client
+    .from('progression')
+    .select('peace_protection_until')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw new Error(`读取免战期失败：${error.message}`);
+  return { peaceProtectionUntil: data?.peace_protection_until ?? null };
+}
+
 /** 读取玩家已解锁的最高兵种等级（未建档则取初始解锁值）。 */
 export async function fetchTroopMaxUnlocked(
   userId: string,

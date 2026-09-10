@@ -9,6 +9,11 @@
 --   5. 若后续改动，直接重新粘贴整份文件执行即可（本文件为全新建库
 --      方式，不含 IF NOT EXISTS，请确保目标库为空库或按需局部执行）
 -- 适用：Supabase Postgres 15+（anon key 直连 + RLS 防串读/串改）
+-- -------------------------------------------------------------
+-- 免战期新手保护：已有库需在 upgrade.sql 补列
+--   ALTER TABLE progression ADD COLUMN IF NOT EXISTS
+--     peace_protection_until timestamptz;
+-- （新建库见下方 CREATE TABLE progression，已含该列）
 -- =============================================================
 
 -- =============================================================
@@ -153,7 +158,8 @@ CREATE TABLE wildlands (
 -- -------------------------------------------------------------
 CREATE TABLE progression (
   user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  troop_max_unlocked integer NOT NULL DEFAULT 3
+  troop_max_unlocked integer NOT NULL DEFAULT 3,
+  peace_protection_until timestamptz
 );
 
 -- -------------------------------------------------------------
@@ -619,8 +625,8 @@ BEGIN
   VALUES (NEW.id, 2000, 1000, 0, 500);
   INSERT INTO action_points (user_id, current, max, last_recovered_at)
   VALUES (NEW.id, 5, 5, now());
-  INSERT INTO progression (user_id, troop_max_unlocked)
-  VALUES (NEW.id, 3);
+  INSERT INTO progression (user_id, troop_max_unlocked, peace_protection_until)
+  VALUES (NEW.id, 3, now() + interval '24 hours');
 
   RETURN NEW;
 EXCEPTION WHEN OTHERS THEN
@@ -884,6 +890,8 @@ DECLARE
   v_tg_level integer;
   v_tg_stars integer;
   v_tg_weapon_id text;
+  -- 目标免战期（新手保护）
+  v_tg_protection timestamptz;
   -- 战力计算
   v_ch_army numeric;
   v_tg_army numeric;
@@ -954,6 +962,14 @@ BEGIN
   -- 1a. 自挑战拦截：同一用户麾下的任意武将均不可作为目标（不止相同的 general id）
   IF v_tg_user = v_caller THEN
     RAISE EXCEPTION 'resolve_pvp: 不能挑战自己的武将';
+  END IF;
+
+  -- 1a'. 免战期校验：目标仍处于新手保护期则拒绝挑战（先于冷却/扣行动点，避免白费行动点）
+  SELECT peace_protection_until INTO v_tg_protection
+    FROM progression
+   WHERE user_id = v_tg_user;
+  IF v_tg_protection IS NOT NULL AND v_tg_protection > now() THEN
+    RAISE EXCEPTION '对方处于免战期，暂时无法挑战';
   END IF;
 
   -- 1b. 防刷：对同一目标用户的挑战设有冷却（60 秒内不可重复），并扣除行动点

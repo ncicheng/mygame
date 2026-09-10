@@ -1,6 +1,20 @@
 -- MyGame 增量升级脚本（对已有库幂等，可重复运行）
 -- 包含：RLS 可见性 / 世界播种 / 军团 / 挑战(PvP)
 
+-- =============================================================
+-- 免战期新手保护（与 schema.sql 保持一致）
+-- =============================================================
+-- 已有库补齐 progression 上的免战期列（幂等，可重复执行）
+ALTER TABLE progression ADD COLUMN IF NOT EXISTS
+  peace_protection_until timestamptz;
+
+-- 为既有老用户补发 24 小时免战期（幂等：只补 NULL 行）。
+-- 新建用户的免战期由 seed_new_user 触发（见 schema.sql），
+-- 此处仅覆盖升级前已存在的用户。
+UPDATE progression
+   SET peace_protection_until = now() + interval '24 hours'
+ WHERE peace_protection_until IS NULL;
+
 -- [1] RLS：开放 generals/cities 共享可见
 DROP POLICY IF EXISTS generals_select ON generals;
 CREATE POLICY generals_select ON generals
@@ -329,6 +343,8 @@ DECLARE
   v_tg_rate numeric;
   -- 挑战记录
   v_challenge_id text;
+  -- 免战期校验：目标是否处于新手保护期
+  v_tg_protection timestamptz;
   -- 防刷：同目标冷却 + 行动点门槛
   v_last_challenge_at timestamptz;
   v_ap_current integer;
@@ -377,6 +393,14 @@ BEGIN
   -- 1a. 自挑战拦截：同一用户麾下的任意武将均不可作为目标（不止相同的 general id）
   IF v_tg_user = v_caller THEN
     RAISE EXCEPTION 'resolve_pvp: 不能挑战自己的武将';
+  END IF;
+
+  -- 1a'. 免战期校验：目标仍处于新手保护期则拒绝挑战（先于冷却/扣行动点，避免白费行动点）
+  SELECT peace_protection_until INTO v_tg_protection
+    FROM progression
+   WHERE user_id = v_tg_user;
+  IF v_tg_protection IS NOT NULL AND v_tg_protection > now() THEN
+    RAISE EXCEPTION '对方处于免战期，暂时无法挑战';
   END IF;
 
   -- 1b. 防刷：对同一目标用户的挑战设有冷却（60 秒内不可重复），并扣除行动点
