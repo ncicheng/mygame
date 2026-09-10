@@ -13,6 +13,7 @@ import type { AuthUser } from './auth';
 import {
   cancelMarch,
   createGuild,
+  fetchChallenges,
   fetchGeneral,
   fetchGuildMembers,
   fetchGuilds,
@@ -22,8 +23,10 @@ import {
   fetchTroopMaxUnlocked,
   fetchWorld,
   finalizeMarch,
+  initiateChallenge,
   joinGuild,
   leaveGuild,
+  type Challenge,
   type Guild,
   type GuildMember,
 } from './data';
@@ -90,6 +93,10 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
   const [marching, setMarching] = useState(false);
   const [reports, setReports] = useState<BattleReport[]>([]);
   const [activeReport, setActiveReport] = useState<BattleReport | null>(null);
+  // PvP 挑战：最近挑战列表 + 发起中的加载态 + 提示
+  const [challenges, setChallenges] = useState<Challenge[]>([]);
+  const [challenging, setChallenging] = useState(false);
+  const [challengeMsg, setChallengeMsg] = useState<string | null>(null);
   // 玩家自身数据（武将/资源/兵种解锁/战报）
   const [general, setGeneral] = useState<General | null>(null);
   const [resources, setResources] = useState<Resources | null>(null);
@@ -107,7 +114,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
   // 世界状态与玩家数据（各取所需，任一失败不拖累整体）
   const refreshAll = useCallback(
     async (showError: boolean) => {
-      const [w, gen, res, max, rep, myG, gs] = await Promise.allSettled([
+      const [w, gen, res, max, rep, myG, gs, ch] = await Promise.allSettled([
         fetchWorld(user.id),
         fetchGeneral(user.id),
         fetchResources(user.id),
@@ -115,6 +122,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
         fetchReports(user.id),
         fetchMyGuild(user.id),
         fetchGuilds(),
+        fetchChallenges(user.id),
       ]);
       if (w.status === 'fulfilled') {
         setWorld((prev) => mergeActiveMarchPositions(w.value, prev));
@@ -141,6 +149,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
         }
       }
       if (gs.status === 'fulfilled') setGuilds(gs.value);
+      if (ch.status === 'fulfilled') setChallenges(ch.value);
     },
     [user.id],
   );
@@ -394,6 +403,32 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
     [user.id, refreshAll],
   );
 
+  // 选中格上的敌方部队（side='enemy'）；选中敌方时显示"挑战"入口
+  const selectedEnemyArmy = selected?.markers.find((m) => m.army?.side === 'enemy')?.army ?? null;
+
+  // 挑战入口：以本人主武将发起对选中敌方部队的 1v1 PvP 挑战，结算后刷新挑战列表
+  const handleChallenge = useCallback(
+    async (targetGeneralId: string) => {
+      if (challenging || !general) {
+        setChallengeMsg(!general ? '尚未拥有武将，无法发起挑战' : null);
+        return;
+      }
+      setChallenging(true);
+      setChallengeMsg(null);
+      try {
+        await initiateChallenge(user.id, general.id, targetGeneralId);
+        await refreshAll(false);
+        setChallengeMsg('挑战已结算，结果见右侧挑战列表');
+        setSelected(null);
+      } catch (err) {
+        setChallengeMsg(err instanceof Error ? err.message : String(err));
+      } finally {
+        setChallenging(false);
+      }
+    },
+    [user.id, general, challenging, refreshAll],
+  );
+
   if (error || !world) {
     return (
       <div className="vc">
@@ -439,7 +474,19 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
             selectedArmyId={marchArmyId}
           />
           <div className="selbar">
-            {selectedMarchArmy ? (
+            {selectedEnemyArmy ? (
+              <span className="marchbar">
+                敌方「{selectedEnemyArmy.generalName}」· 兵力 {selectedEnemyArmy.troopCount.toLocaleString()}
+                <button
+                  type="button"
+                  className="act kind"
+                  disabled={challenging}
+                  onClick={() => void handleChallenge(selectedEnemyArmy.id)}
+                >
+                  {challenging ? '挑战中…' : '挑战'}
+                </button>
+              </span>
+            ) : selectedMarchArmy ? (
               <span className="marchbar">
                 「{selectedMarchArmy.generalName}」行军至 ({selectedMarchArmy.march!.targetX},
                 {selectedMarchArmy.march!.targetY}) ·{' '}
@@ -463,12 +510,14 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
             )}
           </div>
           {marchErr && <div className="march-err">{marchErr}</div>}
+          {challengeMsg && <div className="march-err">{challengeMsg}</div>}
         </section>
         <aside className="col">
           <RightColumn
             userId={user.id}
             resources={resources}
             reports={reports}
+            challenges={challenges}
             quests={computeQuests({
               reports,
               troops: general?.army ?? [],

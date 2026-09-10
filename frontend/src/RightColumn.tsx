@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import type { BattleReport, Resources } from '@mygame/shared';
 import type { QuestState } from './quests';
-import type { Guild, GuildMember } from './data';
+import type { Challenge, Guild, GuildMember } from './data';
 
 interface RightColumnProps {
   /** 当前玩家 id（用于判定盟主本人 / 控制退出按钮） */
   userId: string;
   resources: Resources | null;
   reports: BattleReport[];
+  /** PvP 挑战列表（与本人相关的挑战，按时间倒序） */
+  challenges: Challenge[];
   quests: QuestState;
   /** 点击某条战报时打开战斗回放 */
   onOpenReport(report: BattleReport): void;
@@ -30,6 +32,7 @@ export function RightColumn({
   userId,
   resources,
   reports,
+  challenges,
   quests,
   onOpenReport,
   myGuild,
@@ -68,6 +71,20 @@ export function RightColumn({
                 {r.victory && r.droppedRare > 0 ? `+${r.droppedRare}稀有` : '失败'}
               </span>
             </button>
+          ))
+        )}
+      </section>
+
+      <section className="card">
+        <h4>⚔ 挑战</h4>
+        {challenges.length === 0 ? (
+          <div className="trow"><span>暂无挑战（选中敌方部队可发起）</span></div>
+        ) : (
+          challenges.slice(0, 8).map((c) => (
+            <div className="trow" key={c.id}>
+              <span>{challengeBadge(c, userId)}</span>
+              <span className="n hint">{new Date(c.createdAt).toLocaleTimeString()}</span>
+            </div>
           ))
         )}
       </section>
@@ -150,9 +167,18 @@ export function RightColumn({
   );
 }
 
+/** 挑战徽标：按当前玩家视角把服务器 result（挑战者视角）映射为获胜/失败/平局文案。 */
+function challengeBadge(c: Challenge, userId: string): string {
+  // result 相对挑战者：我是挑战者时直读，我是被挑战者时取反
+  const perspective =
+    c.challengerUserId === userId ? c.result : c.result === 'draw' ? 'draw' : c.result === 'challenger_win' ? 'challenger_lose' : 'challenger_win';
+  const prefix = c.challengerUserId === userId ? '发起' : '应战';
+  if (perspective === 'draw') return `${prefix} · 平局`;
+  return `${prefix} · ${perspective === 'challenger_win' ? '挑战获胜' : '挑战失败'}`;
+}
+
 /** 创建军团的表单：输入名称 + 提交按钮。 */
-function GuildCreateForm({ onCreateGuild }: { onCreateGuild(name: string): void }) {
-  const [name, setName] = useState('');
+function GuildCreateForm({ onCreateGuild }: { onCreateGuild(name: string): void }) {  const [name, setName] = useState('');
   const submit = () => {
     const trimmed = name.trim();
     if (!trimmed) return;
