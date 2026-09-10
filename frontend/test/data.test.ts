@@ -26,6 +26,7 @@ import {
   initiateChallenge,
   fetchChallenges,
   fetchProtection,
+  refreshWildlands,
 } from '../src/data.js';
 import type { CombatResult, CombatUnit } from '@mygame/shared';
 
@@ -633,4 +634,19 @@ test('fetchProtection 无 progression 行时返回 null', async () => {
     progression: [],
   });
   assert.deepEqual(await fetchProtection(USER, client), { peaceProtectionUntil: null });
+});
+
+test('refreshWildlands 调 RPC refresh_wildlands 且传 p_world_id', async () => {
+  const { client, callsOf } = makeFakeSupabase({});
+  await refreshWildlands('w1', client);
+  const rpcCall = callsOf('rpc').find((c) => (c.args[0] as string) === 'refresh_wildlands');
+  assert.ok(rpcCall, '应调用 refresh_wildlands');
+  assert.deepEqual(rpcCall!.args[1], { p_world_id: 'w1' });
+});
+
+test('refreshWildlands 失败时抛中文 Error', async () => {
+  const { client } = makeFakeSupabase({
+    rpc: { data: null, error: { message: 'boom' } },
+  });
+  await assert.rejects(() => refreshWildlands('w1', client), /刷新野地失败/);
 });

@@ -1145,3 +1145,24 @@ EXCEPTION WHEN OTHERS THEN
   RAISE;
 END;
 $$;
+
+-- -------------------------------------------------------------
+-- 21. refresh_wildlands：重置攻破超时的野地（服务器权威刷新）
+-- -------------------------------------------------------------
+-- SECURITY DEFINER 以函数所有者身份执行，绕开共享世界只读的 RLS（wildlands RLS 禁止客户端写）。
+-- 把攻破时间超过 5 分钟的野地 defeated_at 清空，使其在 fetchWorld 中重新出现。
+-- 刷新窗口 5 分钟与 shared 层 WILDLAND_REFRESH_MS=300000ms 保持一致。
+CREATE OR REPLACE FUNCTION refresh_wildlands(p_world_id text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  UPDATE wildlands
+  SET defeated_at = NULL
+  WHERE world_id = p_world_id
+    AND defeated_at IS NOT NULL
+    AND defeated_at < now() - interval '5 minutes';
+END;
+$$;
