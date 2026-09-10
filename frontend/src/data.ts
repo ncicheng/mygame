@@ -475,21 +475,33 @@ export async function initiateChallenge(
   if (tErr) throw new Error(`发起挑战失败：${tErr.message}`);
   if (!target) throw new Error('发起挑战失败：目标武将不存在');
 
-  const { error } = await client.from('challenges').insert({
-    id: crypto.randomUUID(),
-    challenger_user_id: userId,
-    target_user_id: target.user_id,
-    challenger_general_id: challengerGeneralId,
-    target_general_id: targetGeneralId,
-    status: 'pending',
-  });
+  const { data: inserted, error } = await client
+    .from('challenges')
+    .insert({
+      id: crypto.randomUUID(),
+      challenger_user_id: userId,
+      target_user_id: target.user_id,
+      challenger_general_id: challengerGeneralId,
+      target_general_id: targetGeneralId,
+      status: 'pending',
+    })
+    .select('id')
+    .single();
   if (error) throw new Error(`发起挑战失败：${error.message}`);
+  const insertedId = inserted?.id;
 
   const { error: rpcErr } = await client.rpc('resolve_pvp', {
     p_challenger_general_id: challengerGeneralId,
     p_target_general_id: targetGeneralId,
   });
-  if (rpcErr) throw new Error(`结算挑战失败：${rpcErr.message}`);
+  if (rpcErr) {
+    // RPC 失败时回滚刚插入的 pending 行，避免孤儿挑战一直出现在挑战列表。
+    // RLS 允许本人删除自己插入的挑战，删除失败则放弃（best-effort），照常抛原始 RPC 错误。
+    if (insertedId) {
+      await client.from('challenges').delete().eq('id', insertedId);
+    }
+    throw new Error(`结算挑战失败：${rpcErr.message}`);
+  }
 }
 
 /** 读取与本人相关（作为挑战者或被挑战者）的挑战，按创建时间倒序。 */

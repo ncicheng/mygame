@@ -111,13 +111,18 @@ function makeFakeSupabase(
     return q;
   };
   return {
-    client: {
+      client: {
       from,
       rpc: (...a: unknown[]) => {
         const rpcCalls = tables.get('rpc') ?? [];
         rpcCalls.push({ method: 'rpc', args: a });
         tables.set('rpc', rpcCalls);
-        return Promise.resolve({ data: {}, error: null });
+        const raw = perTable['rpc'] as { data?: unknown; error?: { message: string } | null } | undefined;
+        return Promise.resolve(
+          raw && 'error' in raw
+            ? { data: raw.data ?? {}, error: raw.error }
+            : { data: {}, error: null },
+        );
       },
     } as unknown as SupabaseClient,
     order,
@@ -570,6 +575,21 @@ test('initiateChallenge 插入 pending 挑战并调用 resolve_pvp', async () =>
   const rpcCall = callsOf('rpc').find((c) => (c.args[0] as string) === 'resolve_pvp');
   assert.ok(rpcCall, '应调用 resolve_pvp');
   assert.deepEqual(rpcCall!.args[1], { p_challenger_general_id: 'chg', p_target_general_id: 'tgt' });
+});
+
+test('initiateChallenge resolve_pvp 失败时删除刚插入的 pending 行并抛错', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    generals: [{ id: 'tgt', user_id: 'u2' }],
+    challenges: { data: [{ id: 'cX' }], error: null },
+    rpc: { data: null, error: { message: 'boom' } },
+  });
+
+  await assert.rejects(() => initiateChallenge(USER, 'chg', 'tgt', client), /结算挑战失败/);
+
+  const del = callsOf('challenges').find((c) => c.method === 'delete');
+  assert.ok(del, 'RPC 失败后应删除插入的挑战');
+  const idEq = callsOf('challenges').find((c) => c.method === 'eq' && c.args[0] === 'id');
+  assert.equal(idEq?.args[1], 'cX', '应按插入的 id 删除 pending 行');
 });
 
 test('fetchChallenges 读自己相关的挑战并映射', async () => {
