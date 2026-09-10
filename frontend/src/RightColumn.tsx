@@ -80,12 +80,18 @@ export function RightColumn({
         {challenges.length === 0 ? (
           <div className="trow"><span>暂无挑战（选中敌方部队可发起）</span></div>
         ) : (
-          challenges.slice(0, 8).map((c) => (
-            <div className="trow" key={c.id}>
-              <span>{challengeBadge(c, userId)}</span>
-              <span className="n hint">{new Date(c.createdAt).toLocaleTimeString()}</span>
-            </div>
-          ))
+          challenges.slice(0, 8).map((c) => {
+            const summary = challengeSummary(c, userId);
+            return (
+              <div className="trow" key={c.id}>
+                <span className="challenge-info">
+                  <span>{challengeBadge(c, userId)}</span>
+                  {summary && <span className="hint">{summary}</span>}
+                </span>
+                <span className="n hint">{new Date(c.createdAt).toLocaleTimeString()}</span>
+              </div>
+            );
+          })
         )}
       </section>
 
@@ -169,16 +175,43 @@ export function RightColumn({
 
 /** 挑战徽标：按当前玩家视角把服务器 result（挑战者视角）映射为获胜/失败/平局文案。 */
 function challengeBadge(c: Challenge, userId: string): string {
-  // result 相对挑战者：我是挑战者时直读，我是被挑战者时取反
-  const perspective =
-    c.challengerUserId === userId ? c.result : c.result === 'draw' ? 'draw' : c.result === 'challenger_win' ? 'challenger_lose' : 'challenger_win';
   const prefix = c.challengerUserId === userId ? '发起' : '应战';
+  // 未结算（pending / result 为空）显示「待结算」，避免误判为失败
+  if (c.status !== 'resolved' || !c.result) return `${prefix} · 待结算`;
+  // result 相对挑战者：我是挑战者时直读，我是被挑战者时取反
+  let perspective: string;
+  if (c.challengerUserId === userId) {
+    perspective = c.result;
+  } else if (c.result === 'draw') {
+    perspective = 'draw';
+  } else {
+    perspective = c.result === 'challenger_win' ? 'challenger_lose' : 'challenger_win';
+  }
   if (perspective === 'draw') return `${prefix} · 平局`;
   return `${prefix} · ${perspective === 'challenger_win' ? '挑战获胜' : '挑战失败'}`;
 }
 
+/** 从 result_summary 提取当前玩家视角的战力/战损摘要文案；无摘要返回 null。 */
+function challengeSummary(c: Challenge, userId: string): string | null {
+  if (c.status !== 'resolved' || !c.resultSummary) return null;
+  const s = c.resultSummary as {
+    attacker?: { power?: number; casualties?: number };
+    defender?: { power?: number; casualties?: number };
+  };
+  const attacker = s.attacker;
+  const defender = s.defender;
+  if (!attacker || !defender) return null;
+  const iAmChallenger = c.challengerUserId === userId;
+  const myPower = iAmChallenger ? attacker.power : defender.power;
+  const theirPower = iAmChallenger ? defender.power : attacker.power;
+  const myCasualties = iAmChallenger ? attacker.casualties : defender.casualties;
+  const theirCasualties = iAmChallenger ? defender.casualties : attacker.casualties;
+  return `战力 ${myPower ?? 0} vs ${theirPower ?? 0} · 我方战损 ${myCasualties ?? 0} / 对方战损 ${theirCasualties ?? 0}`;
+}
+
 /** 创建军团的表单：输入名称 + 提交按钮。 */
-function GuildCreateForm({ onCreateGuild }: { onCreateGuild(name: string): void }) {  const [name, setName] = useState('');
+function GuildCreateForm({ onCreateGuild }: { onCreateGuild(name: string): void }) {
+  const [name, setName] = useState('');
   const submit = () => {
     const trimmed = name.trim();
     if (!trimmed) return;

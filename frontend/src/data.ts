@@ -453,6 +453,8 @@ export interface Challenge {
   targetUserId: string;
   status: string;
   result: string | null;
+  /** 结算摘要（战力/战损/胜负），由 resolve_pvp 写入；pending 行为 null。 */
+  resultSummary: Record<string, unknown> | null;
   createdAt: string;
 }
 
@@ -511,7 +513,7 @@ export async function fetchChallenges(
 ): Promise<Challenge[]> {
   const { data, error } = await client
     .from('challenges')
-    .select('id,challenger_user_id,target_user_id,status,result,created_at')
+    .select('id,challenger_user_id,target_user_id,status,result,result_summary,created_at')
     .or(`challenger_user_id.eq.${userId},target_user_id.eq.${userId}`)
     .order('created_at', { ascending: false });
   if (error) throw new Error(`读取挑战失败：${error.message}`);
@@ -521,6 +523,7 @@ export async function fetchChallenges(
     targetUserId: r.target_user_id,
     status: r.status,
     result: r.result,
+    resultSummary: (r.result_summary as Record<string, unknown> | null) ?? null,
     createdAt: new Date(r.created_at).toISOString(),
   }));
 }

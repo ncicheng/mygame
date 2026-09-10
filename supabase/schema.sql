@@ -683,6 +683,8 @@ CREATE TABLE challenges (
   target_general_id text REFERENCES generals(id),
   status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','resolved','cancelled')),
   result text CHECK (result IN ('challenger_win','challenger_lose','draw')),
+  -- 结算摘要：战力/战损/胜负（由 resolve_pvp RPC 写入；pending 行为 NULL）
+  result_summary jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   resolved_at timestamptz
 );
@@ -827,6 +829,7 @@ DECLARE
   -- 战斗记录
   v_battle_id text;
   v_log jsonb;
+  v_summary jsonb;
   v_ch_power_int integer;
   v_tg_power_int integer;
 BEGIN
@@ -975,12 +978,8 @@ BEGIN
   INSERT INTO pvp_battle_reports (id, user_id, general_id, battle_instance_id, opponent_general_id, victory, attacker_casualties, defender_casualties, log, created_at)
   VALUES (gen_random_uuid()::text, v_tg_user, p_target_general_id, v_battle_id, p_challenger_general_id, COALESCE(NOT v_attacker_won, false), v_ch_casualties, v_tg_casualties, v_log, now());
 
-  -- 8. 更新挑战状态为已结算
-  UPDATE challenges SET status = 'resolved', result = v_result, resolved_at = now()
-   WHERE id = v_challenge_id;
-
-  -- 9. 返回摘要
-  RETURN jsonb_build_object(
+  -- 8. 更新挑战状态为已结算，并把战力/战损摘要写入 result_summary 供前端展示
+  v_summary := jsonb_build_object(
     'challenge_id', v_challenge_id,
     'battle_instance_id', v_battle_id,
     'result', v_result,
@@ -988,6 +987,11 @@ BEGIN
     'attacker', jsonb_build_object('general_id', p_challenger_general_id, 'power', v_ch_power_int, 'casualties', v_ch_casualties),
     'defender', jsonb_build_object('general_id', p_target_general_id, 'power', v_tg_power_int, 'casualties', v_tg_casualties)
   );
+  UPDATE challenges SET status = 'resolved', result = v_result, result_summary = v_summary, resolved_at = now()
+   WHERE id = v_challenge_id;
+
+  -- 9. 返回摘要
+  RETURN v_summary;
 
 EXCEPTION WHEN OTHERS THEN
   -- 子事务自动回滚后重抛，保证整体原子性

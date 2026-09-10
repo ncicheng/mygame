@@ -322,6 +322,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
       }
       setSelected(cell);
       setMarchErr(null);
+      setChallengeMsg(null);
     },
     [marchMode, banditMode, marchArmyId, handleIssueMarch],
   );

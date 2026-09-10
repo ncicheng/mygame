@@ -160,6 +160,14 @@
   color: var(--mg-text-dim);
 }
 
+/* 挑战行左侧：徽标 + 战力/战损摘要竖排 */
+.vc .trow .challenge-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
 .vc .bar {
   height: 8px;
   background: rgba(255, 255, 255, 0.08);

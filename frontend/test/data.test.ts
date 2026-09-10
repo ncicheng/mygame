@@ -595,8 +595,8 @@ test('initiateChallenge resolve_pvp 失败时删除刚插入的 pending 行并�
 test('fetchChallenges 读自己相关的挑战并映射', async () => {
   const { client, callsOf } = makeFakeSupabase({
     challenges: [
-      { id: 'c1', challenger_user_id: USER, target_user_id: 'u2', status: 'pending', result: null, created_at: '2020-01-01T00:00:00Z' },
-      { id: 'c2', challenger_user_id: 'u2', target_user_id: USER, status: 'resolved', result: 'challenger_win', created_at: '2020-01-02T00:00:00Z' },
+      { id: 'c1', challenger_user_id: USER, target_user_id: 'u2', status: 'pending', result: null, result_summary: null, created_at: '2020-01-01T00:00:00Z' },
+      { id: 'c2', challenger_user_id: 'u2', target_user_id: USER, status: 'resolved', result: 'challenger_win', result_summary: { result: 'challenger_win' }, created_at: '2020-01-02T00:00:00Z' },
     ],
   });
   const list = await fetchChallenges(USER, client);
@@ -607,8 +607,10 @@ test('fetchChallenges 读自己相关的挑战并映射', async () => {
     targetUserId: 'u2',
     status: 'pending',
     result: null,
+    resultSummary: null,
     createdAt: '2020-01-01T00:00:00.000Z',
   });
   assert.equal(list[1].result, 'challenger_win');
+  assert.deepEqual(list[1].resultSummary, { result: 'challenger_win' });
   assert.ok(callsOf('challenges').some((c) => c.method === 'or'), '应按或条件过滤双方');
 });
