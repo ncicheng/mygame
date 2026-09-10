@@ -245,6 +245,9 @@ export async function fetchWorld(
   }
   if (!worldId) throw new Error('世界尚未初始化，请先初始化世界数据');
 
+  // 先刷新攻破超时（5 分钟）的野地，使其在本轮查询中重新出现
+  await refreshWildlands(worldId, client);
+
   const { data: worldRow, error: worldErr } = await client
     .from('worlds')
     .select('id,name,width,height')
@@ -334,6 +337,23 @@ export async function fetchWorld(
     armies,
     actionPoints,
   };
+}
+
+// ---------------------------------------------------------------------------
+// 野地刷新
+// ---------------------------------------------------------------------------
+
+/**
+ * 刷新野地：调 refresh_wildlands RPC（SECURITY DEFINER）把攻破超时（5 分钟）的野地
+ * defeated_at 清空，使其在 fetchWorld 的 defeated_at IS NULL 过滤中重新出现。
+ * RPC 参数名与 schema.sql 定义一致为 p_world_id。
+ */
+export async function refreshWildlands(
+  worldId: string,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client.rpc('refresh_wildlands', { p_world_id: worldId });
+  if (error) throw new Error(`刷新野地失败：${error.message}`);
 }
 
 // ---------------------------------------------------------------------------
