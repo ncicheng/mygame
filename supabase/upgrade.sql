@@ -74,13 +74,13 @@ END;
 $$;
 
 -- [3] 军团表 + RLS
-CREATE TABLE guilds (
+CREATE TABLE IF NOT EXISTS guilds (
   id text PRIMARY KEY,
   name text NOT NULL UNIQUE,
   leader_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE TABLE guild_members (
+CREATE TABLE IF NOT EXISTS guild_members (
   guild_id text NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   joined_at timestamptz NOT NULL DEFAULT now(),
@@ -92,19 +92,26 @@ ALTER TABLE guilds ENABLE ROW LEVEL SECURITY;
 ALTER TABLE guild_members ENABLE ROW LEVEL SECURITY;
 
 -- guilds：登录用户可读全部；创建任意登录用户；改名/解散仅 leader
+DROP POLICY IF EXISTS guilds_select ON guilds;
 CREATE POLICY guilds_select ON guilds FOR SELECT USING (auth.uid() IS NOT NULL);
+DROP POLICY IF EXISTS guilds_insert ON guilds;
 CREATE POLICY guilds_insert ON guilds
   FOR INSERT WITH CHECK (auth.uid() = leader_user_id);
+DROP POLICY IF EXISTS guilds_update ON guilds;
 CREATE POLICY guilds_update ON guilds
   FOR UPDATE USING (auth.uid() = leader_user_id) WITH CHECK (auth.uid() = leader_user_id);
+DROP POLICY IF EXISTS guilds_delete ON guilds;
 CREATE POLICY guilds_delete ON guilds
   FOR DELETE USING (auth.uid() = leader_user_id);
 
 -- guild_members：登录用户可读全部；加入/退出仅本人
+DROP POLICY IF EXISTS guild_members_select ON guild_members;
 CREATE POLICY guild_members_select ON guild_members
   FOR SELECT USING (auth.uid() IS NOT NULL);
+DROP POLICY IF EXISTS guild_members_insert ON guild_members;
 CREATE POLICY guild_members_insert ON guild_members
   FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS guild_members_delete ON guild_members;
 CREATE POLICY guild_members_delete ON guild_members
   FOR DELETE USING (auth.uid() = user_id);
 
@@ -112,7 +119,7 @@ CREATE POLICY guild_members_delete ON guild_members
 -- 17. PvP 挑战（1v1）：发起/结算/取消，结算由 SECURITY DEFINER RPC 写入
 
 -- [4] 挑战系统（challenges/troop_stats/pvp 表 + resolve_pvp RPC + 策略）
-CREATE TABLE challenges (
+CREATE TABLE IF NOT EXISTS challenges (
   id text PRIMARY KEY,
   challenger_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   target_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -127,12 +134,15 @@ CREATE TABLE challenges (
 );
 ALTER TABLE challenges ENABLE ROW LEVEL SECURITY;
 -- 双方（挑战者/被挑战者）可读自己的挑战；发起者写；结算由 RPC（SECURITY DEFINER）写
+DROP POLICY IF EXISTS challenges_select ON challenges;
 CREATE POLICY challenges_select ON challenges
   FOR SELECT USING (auth.uid() IN (challenger_user_id, target_user_id));
+DROP POLICY IF EXISTS challenges_insert ON challenges;
 CREATE POLICY challenges_insert ON challenges
   FOR INSERT WITH CHECK (auth.uid() = challenger_user_id);
 -- 挑战者本人可删除自己的挑战：供 initiateChallenge 在 RPC 结算失败时回滚 pending 行。
 -- 若无此策略，回滚 delete 会被 RLS 拒绝（且错误被吞掉），孤儿挑战无法清理。
+DROP POLICY IF EXISTS challenges_delete ON challenges;
 CREATE POLICY challenges_delete ON challenges
   FOR DELETE USING (auth.uid() = challenger_user_id);
 
@@ -141,7 +151,7 @@ CREATE POLICY challenges_delete ON challenges
 -- =============================================================
 -- 本表镜像 shared/src/troops.ts 的 TROOP_CATALOG（单兵 power）。
 -- 单一数据源是 shared/src/troops.ts；troop_stats 是给 RPC 用的 SQL 侧副本，改动须两边同步。
-CREATE TABLE troop_stats (
+CREATE TABLE IF NOT EXISTS troop_stats (
   soldier_level integer PRIMARY KEY,
   power integer NOT NULL
 );
@@ -167,7 +177,7 @@ INSERT INTO troop_stats (soldier_level, power) VALUES
 --     二者含 NOT NULL 野地外键与野地回写 RLS，无法承载 1v1 PvP，
 --     故为 PvP 另建一对表。均只读，写入由 resolve_pvp（SECURITY DEFINER）负责）
 -- =============================================================
-CREATE TABLE pvp_battle_instances (
+CREATE TABLE IF NOT EXISTS pvp_battle_instances (
   id text PRIMARY KEY,
   challenger_general_id text NOT NULL REFERENCES generals(id) ON DELETE CASCADE,
   target_general_id text NOT NULL REFERENCES generals(id) ON DELETE CASCADE,
@@ -183,7 +193,7 @@ CREATE TABLE pvp_battle_instances (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE pvp_battle_reports (
+CREATE TABLE IF NOT EXISTS pvp_battle_reports (
   id text PRIMARY KEY,
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   general_id text NOT NULL REFERENCES generals(id) ON DELETE CASCADE,
@@ -200,9 +210,11 @@ ALTER TABLE pvp_battle_instances ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pvp_battle_reports ENABLE ROW LEVEL SECURITY;
 
 -- 双方（挑战者/被挑战者）可读战斗记录；写入由 SECURITY DEFINER RPC 完成
+DROP POLICY IF EXISTS pvp_battle_instances_select ON pvp_battle_instances;
 CREATE POLICY pvp_battle_instances_select ON pvp_battle_instances
   FOR SELECT USING (auth.uid() IN (challenger_user_id, target_user_id));
 -- 每名玩家只读自己的战报
+DROP POLICY IF EXISTS pvp_battle_reports_select ON pvp_battle_reports;
 CREATE POLICY pvp_battle_reports_select ON pvp_battle_reports
   FOR SELECT USING (auth.uid() = user_id);
 
