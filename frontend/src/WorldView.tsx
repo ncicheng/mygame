@@ -510,27 +510,14 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
     [user.id, general, challenging, refreshAll],
   );
 
-  if (error || !world) {
-    return (
-      <div className="vc">
-        <div className="vc-status vc-status-error">
-          {error ?? '世界加载失败'}{' '}
-          <button type="button" className="act kind" onClick={() => window.location.reload()}>
-            重试
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // 城池 id → 名称：攻城卡展示目标城名用（world 已确认非空）
+  // 城池 id → 名称：攻城卡展示目标城名用（hooks 须无条件调用，world 可为空）
   const cityNameById = useMemo(() => {
     const map: Record<string, string> = {};
-    for (const c of world.cities) {
+    for (const c of world?.cities ?? []) {
       map[c.id] = c.name;
     }
     return map;
-  }, [world.cities]);
+  }, [world]);
 
   // 全局统计：由战报/攻城/挑战/资源/养成聚合派生，供右栏「统计」卡展示
   const stats = useMemo(
@@ -546,6 +533,19 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
       }),
     [user.id, reports, sieges, challenges, resources, general],
   );
+
+  if (error || !world) {
+    return (
+      <div className="vc">
+        <div className="vc-status vc-status-error">
+          {error ?? '世界加载失败'}{' '}
+          <button type="button" className="act kind" onClick={() => window.location.reload()}>
+            重试
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="vc">
