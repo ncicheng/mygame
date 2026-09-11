@@ -6,6 +6,10 @@ export interface BoardMarker {
   kind: 'city' | 'bandit' | 'army';
   side?: Side;
   label: string;
+  /** 城池标记对应的城池 id（攻城入口用；非城池标记为空） */
+  cityId?: string;
+  /** 城池名称（攻城结果/入口展示用） */
+  cityName?: string;
   /** 部队标记对应的大地图部队（用于选中行军队列） */
   army?: WorldArmy;
   /** 部队是否正在行军 */
@@ -46,7 +50,13 @@ export function buildCells(world: WorldStateResponse): MapCell[] {
     byKey.set(key, list);
   };
   for (const c of world.cities) {
-    push(`${c.x},${c.y}`, { kind: 'city', side: c.side, label: c.side === 'me' ? '城' : '敌城' });
+    push(`${c.x},${c.y}`, {
+      kind: 'city',
+      side: c.side,
+      label: c.side === 'me' ? '城' : '敌城',
+      cityId: c.id,
+      cityName: c.name,
+    });
   }
   for (const wl of world.wildlands) {
     push(`${wl.x},${wl.y}`, { kind: 'bandit', label: '野' });

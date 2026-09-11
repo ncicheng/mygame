@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   BattleReport,
   CombatSideInput,
@@ -22,17 +22,20 @@ import {
   fetchProtection,
   fetchReports,
   fetchResources,
+  fetchSieges,
   fetchTerritory,
   fetchTroopMaxUnlocked,
   fetchWorld,
   setNickname,
   finalizeMarch,
   initiateChallenge,
+  initiateSiege,
   joinGuild,
   leaveGuild,
   type Challenge,
   type Guild,
   type GuildMember,
+  type Siege,
 } from './data';
 import { computeMarchPosition, issueMarch, settleBattle } from './game';
 import { computeQuests } from './quests';
@@ -101,6 +104,10 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [challenging, setChallenging] = useState(false);
   const [challengeMsg, setChallengeMsg] = useState<string | null>(null);
+  // 攻城：最近攻城记录 + 发起中的加载态 + 提示
+  const [sieges, setSieges] = useState<Siege[]>([]);
+  const [sieging, setSieging] = useState(false);
+  const [siegeMsg, setSiegeMsg] = useState<string | null>(null);
   // 玩家自身数据（武将/资源/兵种解锁/战报）
   const [general, setGeneral] = useState<General | null>(null);
   const [resources, setResources] = useState<Resources | null>(null);
@@ -125,7 +132,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
   // 世界状态与玩家数据（各取所需，任一失败不拖累整体）
   const refreshAll = useCallback(
     async (showError: boolean) => {
-      const [w, gen, res, max, rep, myG, gs, ch, prot, nick] = await Promise.allSettled([
+      const [w, gen, res, max, rep, myG, gs, ch, prot, nick, sg] = await Promise.allSettled([
         fetchWorld(user.id),
         fetchGeneral(user.id),
         fetchResources(user.id),
@@ -136,6 +143,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
         fetchChallenges(user.id),
         fetchProtection(user.id),
         fetchNickname(user.id),
+        fetchSieges(user.id),
       ]);
       if (w.status === 'fulfilled') {
         setWorld((prev) => mergeActiveMarchPositions(w.value, prev));
@@ -182,6 +190,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
       if (ch.status === 'fulfilled') setChallenges(ch.value);
       if (prot.status === 'fulfilled') setProtectionUntil(prot.value.peaceProtectionUntil);
       if (nick.status === 'fulfilled') setNicknameState(nick.value);
+      if (sg.status === 'fulfilled') setSieges(sg.value);
     },
     [user.id],
   );
@@ -451,6 +460,32 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
   // 选中格上的敌方部队（side='enemy'）；选中敌方时显示"挑战"入口
   const selectedEnemyArmy = selected?.markers.find((m) => m.army?.side === 'enemy')?.army ?? null;
 
+  // 选中格上的敌方城池（side='enemy'）；选中敌方城池时显示"攻城"入口
+  const selectedEnemyCity = selected?.markers.find((m) => m.kind === 'city' && m.side === 'enemy') ?? null;
+
+  // 攻城入口：以本人主武将发起对选中敌方城池的攻城，结算后刷新攻城列表
+  const handleSiege = useCallback(
+    async (targetCityId: string) => {
+      if (sieging || !general) {
+        setSiegeMsg(!general ? '尚未拥有武将，无法发起攻城' : null);
+        return;
+      }
+      setSieging(true);
+      setSiegeMsg(null);
+      try {
+        await initiateSiege(user.id, general.id, targetCityId);
+        await refreshAll(false);
+        setSiegeMsg('攻城已结算，结果见右侧攻城卡');
+        setSelected(null);
+      } catch (err) {
+        setSiegeMsg(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSieging(false);
+      }
+    },
+    [user.id, general, sieging, refreshAll],
+  );
+
   // 挑战入口：以本人主武将发起对选中敌方部队的 1v1 PvP 挑战，结算后刷新挑战列表
   const handleChallenge = useCallback(
     async (targetGeneralId: string) => {
@@ -487,6 +522,15 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
     );
   }
 
+  // 城池 id → 名称：攻城卡展示目标城名用（world 已确认非空）
+  const cityNameById = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const c of world.cities) {
+      map[c.id] = c.name;
+    }
+    return map;
+  }, [world.cities]);
+
   return (
     <div className="vc">
       <header className="vc-top">
@@ -521,7 +565,20 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
             selectedArmyId={marchArmyId}
           />
           <div className="selbar">
-            {selectedEnemyArmy ? (
+            {selectedEnemyCity ? (
+              <span className="marchbar">
+                敌方城池「{selectedEnemyCity.cityName ?? selectedEnemyCity.label}」· ({selected!.x},
+                {selected!.y})
+                <button
+                  type="button"
+                  className="act kind"
+                  disabled={sieging}
+                  onClick={() => void handleSiege(selectedEnemyCity.cityId!)}
+                >
+                  {sieging ? '攻城中…' : '攻城'}
+                </button>
+              </span>
+            ) : selectedEnemyArmy ? (
               <span className="marchbar">
                 敌方「{selectedEnemyArmy.generalName}」· 兵力 {selectedEnemyArmy.troopCount.toLocaleString()}
                 <button
@@ -558,6 +615,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
           </div>
           {marchErr && <div className="march-err">{marchErr}</div>}
           {challengeMsg && <div className="march-err">{challengeMsg}</div>}
+          {siegeMsg && <div className="march-err">{siegeMsg}</div>}
         </section>
         <aside className="col">
           <RightColumn
@@ -567,6 +625,8 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
             memberNicknames={memberNicknames}
             reports={reports}
             challenges={challenges}
+            sieges={sieges}
+            cityNameById={cityNameById}
             quests={computeQuests({
               reports,
               troops: general?.army ?? [],
