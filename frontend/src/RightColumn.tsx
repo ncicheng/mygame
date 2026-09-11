@@ -86,7 +86,7 @@ export function RightColumn({
         <div className="trow"><span>打野</span><span className="n">{stats.banditBattles} 场（胜率 {(stats.banditWinRate * 100).toFixed(0)}%）</span></div>
         <div className="trow"><span>挑战</span><span className="n">{stats.challenges} 胜 {stats.challengeWins}</span></div>
         <div className="trow"><span>攻城</span><span className="n">{stats.sieges} 胜 {stats.siegeWins}</span></div>
-        <div className="trow"><span>累计稀有材料</span><span className="n">{stats.totalRare.toLocaleString()}</span></div>
+        <div className="trow"><span>稀有材料</span><span className="n">{stats.currentRare.toLocaleString()}</span></div>
         <div className="trow"><span>兵力</span><span className="n">{stats.troopCount.toLocaleString()}</span></div>
         <div className="trow"><span>武将等级</span><span className="n">Lv.{stats.generalLevel}</span></div>
       </section>

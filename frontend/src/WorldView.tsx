@@ -536,6 +536,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
   const stats = useMemo(
     () =>
       computeStats({
+        userId: user.id,
         reports,
         sieges,
         challenges,
@@ -543,7 +544,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
         general,
         troops: general?.army ?? [],
       }),
-    [reports, sieges, challenges, resources, general],
+    [user.id, reports, sieges, challenges, resources, general],
   );
 
   return (
