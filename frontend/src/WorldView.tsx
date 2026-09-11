@@ -39,6 +39,7 @@ import {
 } from './data';
 import { computeMarchPosition, issueMarch, settleBattle } from './game';
 import { computeQuests } from './quests';
+import { computeStats } from './stats';
 import { ActionDeck } from './ActionDeck';
 import { BattleOverlay } from './BattleOverlay';
 import { CopyrightFooter } from './CopyrightFooter';
@@ -531,12 +532,27 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
     return map;
   }, [world.cities]);
 
+  // 全局统计：由战报/攻城/挑战/资源/养成聚合派生，供右栏「统计」卡展示
+  const stats = useMemo(
+    () =>
+      computeStats({
+        userId: user.id,
+        reports,
+        sieges,
+        challenges,
+        resources,
+        general,
+        troops: general?.army ?? [],
+      }),
+    [user.id, reports, sieges, challenges, resources, general],
+  );
+
   return (
     <div className="vc">
       <header className="vc-top">
-        <h1 className="mg-title">⚔ MyGame 指挥台</h1>
+        <h1 className="mg-title">🏯 运筹帷幄</h1>
         <span className="pl">
-          {nickname ?? user.email ?? user.id} · Lv.{general?.level ?? 1}
+          {nickname ?? user.email ?? user.id} · Lv.{general?.level ?? 1} · 领地 {territory} 城
         </span>
         <span className="ap">
           行动点 {world.actionPoints.current}/{world.actionPoints.max}
@@ -623,6 +639,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
             resources={resources}
             territory={territory}
             memberNicknames={memberNicknames}
+            stats={stats}
             reports={reports}
             challenges={challenges}
             sieges={sieges}
