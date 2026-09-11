@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { BattleReport, Resources } from '@mygame/shared';
 import type { QuestState } from './quests';
 import type { Challenge, Guild, GuildMember, Siege } from './data';
+import type { GameStats } from './stats';
 
 interface RightColumnProps {
   /** 当前玩家 id（用于判定盟主本人 / 控制退出按钮） */
@@ -11,6 +12,8 @@ interface RightColumnProps {
   territory: number;
   /** 军团成员 user_id → 昵称 */
   memberNicknames: Record<string, string | null>;
+  /** 全局统计（由 WorldView 用 computeStats 聚合派生） */
+  stats: GameStats;
   reports: BattleReport[];
   /** PvP 挑战列表（与本人相关的挑战，按时间倒序） */
   challenges: Challenge[];
@@ -43,6 +46,7 @@ export function RightColumn({
   resources,
   territory,
   memberNicknames,
+  stats,
   reports,
   challenges,
   sieges,
@@ -75,6 +79,16 @@ export function RightColumn({
         <div className="trow"><span>稀有材料</span><span className="n">{res.rare.toLocaleString()}</span></div>
         <div className="trow"><span>金币</span><span className="n">{res.gold.toLocaleString()}</span></div>
         <div className="trow"><span>领地</span><span className="n">{territory} 城</span></div>
+      </section>
+
+      <section className="card">
+        <h4>📊 统计</h4>
+        <div className="trow"><span>打野</span><span className="n">{stats.banditBattles} 场（胜率 {(stats.banditWinRate * 100).toFixed(0)}%）</span></div>
+        <div className="trow"><span>挑战</span><span className="n">{stats.challenges} 胜 {stats.challengeWins}</span></div>
+        <div className="trow"><span>攻城</span><span className="n">{stats.sieges} 胜 {stats.siegeWins}</span></div>
+        <div className="trow"><span>累计稀有材料</span><span className="n">{stats.totalRare.toLocaleString()}</span></div>
+        <div className="trow"><span>兵力</span><span className="n">{stats.troopCount.toLocaleString()}</span></div>
+        <div className="trow"><span>武将等级</span><span className="n">Lv.{stats.generalLevel}</span></div>
       </section>
 
       <section className="card">
