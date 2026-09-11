@@ -25,6 +25,8 @@ import {
   leaveGuild,
   initiateChallenge,
   fetchChallenges,
+  initiateSiege,
+  fetchSieges,
   fetchProtection,
   refreshWildlands,
   fetchNickname,
@@ -724,4 +726,64 @@ test('fetchTerritory 失败时抛中文 Error', async () => {
     cities: { data: null, error: { message: 'boom' } },
   });
   await assert.rejects(() => fetchTerritory(USER, 'w1', client), /读取领地失败/);
+});
+
+test('initiateSiege 插入 pending sieges 行并调用 resolve_siege', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    sieges: { data: null, error: null },
+  });
+  await initiateSiege(USER, 'ag1', 'c1', client);
+
+  const ins = callsOf('sieges').find((c) => c.method === 'insert');
+  assert.ok(ins, '应插入 sieges');
+  const row = ins!.args[0] as Record<string, unknown>;
+  assert.equal(row.attacker_user_id, USER);
+  assert.equal(row.target_city_id, 'c1');
+  assert.equal(row.status, 'pending');
+
+  const rpcCall = callsOf('rpc').find((c) => (c.args[0] as string) === 'resolve_siege');
+  assert.ok(rpcCall, '应调用 resolve_siege');
+  assert.deepEqual(rpcCall!.args[1], { p_attacker_general_id: 'ag1', p_target_city_id: 'c1' });
+});
+
+test('initiateSiege resolve_siege 失败时删除刚插入的 pending 行并抛错', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    sieges: { data: [{ id: 'sX' }], error: null },
+    rpc: { data: null, error: { message: 'boom' } },
+  });
+
+  await assert.rejects(() => initiateSiege(USER, 'ag1', 'c1', client), /结算攻城失败/);
+
+  const del = callsOf('sieges').find((c) => c.method === 'delete');
+  assert.ok(del, 'RPC 失败后应删除插入的 sieges 行');
+  const idEq = callsOf('sieges').find((c) => c.method === 'eq' && c.args[0] === 'id');
+  assert.equal(idEq?.args[1], 'sX', '应按插入的 id 删除 pending 行');
+});
+
+test('fetchSieges 读取自己的攻城记录并映射', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    sieges: [
+      { id: 's1', attacker_user_id: USER, target_city_id: 'c1', status: 'pending', result: null, created_at: '2020-01-01T00:00:00Z' },
+      { id: 's2', attacker_user_id: USER, target_city_id: 'c2', status: 'resolved', result: 'attacker_win', created_at: '2020-01-02T00:00:00Z' },
+    ],
+  });
+  const list = await fetchSieges(USER, client);
+  assert.equal(list.length, 2);
+  assert.deepEqual(list[0], {
+    id: 's1',
+    attackerUserId: USER,
+    targetCityId: 'c1',
+    status: 'pending',
+    result: null,
+    createdAt: '2020-01-01T00:00:00.000Z',
+  });
+  assert.equal(list[1].result, 'attacker_win');
+  assert.ok(callsOf('sieges').some((c) => c.method === 'eq' && c.args[0] === 'attacker_user_id' && c.args[1] === USER), '应按 attacker_user_id 过滤');
+});
+
+test('fetchSieges 失败时抛中文 Error', async () => {
+  const { client } = makeFakeSupabase({
+    sieges: { data: null, error: { message: 'boom' } },
+  });
+  await assert.rejects(() => fetchSieges(USER, client), /读取攻城记录失败/);
 });
