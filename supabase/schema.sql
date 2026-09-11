@@ -786,6 +786,26 @@ CREATE POLICY pvp_battle_reports_select ON pvp_battle_reports
   FOR SELECT USING (auth.uid() = user_id);
 
 -- =============================================================
+-- 19b. sieges：攻城记录（与 PvP 记录独立；写入由 resolve_siege SECURITY DEFINER 负责）
+--      status: pending=待结算 / resolved=已结算 / cancelled=已取消
+--      result: 仅两种——城池攻防无平局（均势时胜率恰为 0.5，由种子随机定胜负）
+--      双方（登录用户）可读；仅攻击方可插入/删除；结算由 RPC 写
+-- =============================================================
+CREATE TABLE sieges (
+  id text PRIMARY KEY,
+  attacker_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  target_city_id text NOT NULL REFERENCES cities(id) ON DELETE CASCADE,
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','resolved','cancelled')),
+  result text CHECK (result IN ('attacker_win','attacker_lose')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  resolved_at timestamptz
+);
+ALTER TABLE sieges ENABLE ROW LEVEL SECURITY;
+CREATE POLICY sieges_select ON sieges FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY sieges_insert ON sieges FOR INSERT WITH CHECK (auth.uid() = attacker_user_id);
+CREATE POLICY sieges_delete ON sieges FOR DELETE USING (auth.uid() = attacker_user_id);
+
+-- =============================================================
 -- 20. resolve_pvp：1v1 PvP 服务器权威战斗结算（SECURITY DEFINER）
 -- =============================================================
 -- SECURITY DEFINER 以函数所有者（postgres/supabase_admin）身份执行，
@@ -1174,5 +1194,310 @@ BEGIN
   WHERE world_id = p_world_id
     AND defeated_at IS NOT NULL
     AND defeated_at < now() - interval '5 minutes';
+END;
+$$;
+
+-- =============================================================
+-- 22. resolve_siege：攻城服务器权威战斗结算（SECURITY DEFINER）
+-- =============================================================
+-- SECURITY DEFINER 以函数所有者身份执行，绕开 RLS，从而可同时原子更新
+-- army_units / cities / resources / action_points / sieges / pvp 记录。
+-- 结算公式镜像 resolve_pvp（进而镜像 shared/src/combat.ts）：
+--   generalMultiplier(level, stars) = 1 + (level-1)*0.05 + (stars-1)*0.10
+--   armyPower = SUM(count × troop_stats.power)
+--   weaponBonus = cappedWeaponTier × 50（有效阶由部队最高兵种等级封顶）
+--   generalSidePower = generalMultiplier × armyPower + weaponBonus
+--   winProbability = 1/(1+exp(-2.0*ln(attacker/defender)))
+--   胜方轻损 15%、败方重损 70%（战损 = floor(侧总兵数×rate)，由 allocate_casualties 按行分配）
+-- 与 resolve_pvp 的差异：
+--   1) 城池攻防无平局：均势时胜率恰为 0.5，由种子随机定胜负，sieges.result 仅两种；
+--   2) 守方武将非入参：取城池主人麾下最早创建的一名武将作为守将（确定性默认）；
+--   3) 攻击方胜出后：转移 cities.owner_user_id + 按守军战力掠夺 resources（gold/food）。
+-- 胜负判定种子：abs(hashtext(攻击方武将 id | 城池 id | 攻城 id))，模拟 combat.ts mulberry32。
+-- 防刷：同城池 60 秒冷却 + 扣除 2 行动点（镜像 resolve_pvp）。
+-- 事务原子性：plpgsql 内不允许显式 COMMIT/ROLLBACK，EXCEPTION 子句为函数主体建立
+-- 子事务，异常时自动回滚并重抛，保证整体原子性。
+CREATE OR REPLACE FUNCTION resolve_siege(
+  p_attacker_general_id text,
+  p_target_city_id text
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_caller uuid := auth.uid();
+  -- 攻击方武将
+  v_att_user uuid;
+  v_att_level integer;
+  v_att_stars integer;
+  v_att_weapon_id text;
+  -- 目标城池
+  v_city_owner uuid;
+  -- 守城武将（城池主人麾下最早创建的一名）
+  v_def_general_id text;
+  v_def_user uuid;
+  v_def_level integer;
+  v_def_stars integer;
+  v_def_weapon_id text;
+  -- 城池主人免战期（新手保护）
+  v_owner_protection timestamptz;
+  -- 战力计算
+  v_att_army numeric;
+  v_def_army numeric;
+  v_att_weapon_tier integer;
+  v_def_weapon_tier integer;
+  v_att_max_level integer;
+  v_def_max_level integer;
+  v_att_mult numeric;
+  v_def_mult numeric;
+  v_att_power numeric;
+  v_def_power numeric;
+  v_win_prob numeric;
+  v_seed bigint;
+  v_rand numeric;
+  v_attacker_won boolean;
+  v_result text;
+  v_att_rate numeric;
+  v_def_rate numeric;
+  -- 防刷：同城池冷却 + 行动点门槛
+  v_last_siege_at timestamptz;
+  v_ap_current integer;
+  v_ap_max integer;
+  v_ap_last timestamptz;
+  v_ap_elapsed numeric;
+  v_ap_periods integer;
+  v_ap_new_last timestamptz;
+  -- 战损统计（总额，由 allocate_casualties 计算）
+  v_att_casualties integer := 0;
+  v_def_casualties integer := 0;
+  -- 掠夺量（依守军战力换算）
+  v_plunder integer := 0;
+  -- 攻城记录
+  v_siege_id text;
+  -- 战斗记录
+  v_battle_id text;
+  v_log jsonb;
+  v_summary jsonb;
+  v_att_power_int integer;
+  v_def_power_int integer;
+BEGIN
+  -- 1. 校验：登录态 + 攻击方武将存在且归属本人 + 城池存在且有主 + 非自己城池 + 守城武将存在
+  IF v_caller IS NULL THEN
+    RAISE EXCEPTION 'resolve_siege: 未登录';
+  END IF;
+
+  SELECT user_id, level, stars, weapon_id
+    INTO v_att_user, v_att_level, v_att_stars, v_att_weapon_id
+    FROM generals
+   WHERE id = p_attacker_general_id;
+  IF v_att_user IS NULL THEN
+    RAISE EXCEPTION 'resolve_siege: 攻击方武将不存在 %', p_attacker_general_id;
+  END IF;
+  IF v_att_user <> v_caller THEN
+    RAISE EXCEPTION 'resolve_siege: 无权以他人武将发起攻城';
+  END IF;
+
+  SELECT owner_user_id
+    INTO v_city_owner
+    FROM cities
+   WHERE id = p_target_city_id;
+  IF v_city_owner IS NULL THEN
+    RAISE EXCEPTION 'resolve_siege: 目标城池不存在或已无主 %', p_target_city_id;
+  END IF;
+  IF v_city_owner = v_caller THEN
+    RAISE EXCEPTION 'resolve_siege: 不能进攻自己的城池';
+  END IF;
+
+  -- 守城武将：城池主人麾下最早创建的一名（攻城不指定守将，取确定性默认）
+  SELECT id, user_id, level, stars, weapon_id
+    INTO v_def_general_id, v_def_user, v_def_level, v_def_stars, v_def_weapon_id
+    FROM generals
+   WHERE user_id = v_city_owner
+   ORDER BY created_at, id
+   LIMIT 1;
+  IF v_def_general_id IS NULL THEN
+    RAISE EXCEPTION 'resolve_siege: 该城池主人没有武将，无法防守';
+  END IF;
+
+  -- 1a. 免战期校验：城池主人处于新手保护期则拒绝攻城（先于冷却/扣行动点，避免白费行动点）
+  SELECT peace_protection_until INTO v_owner_protection
+    FROM progression
+   WHERE user_id = v_city_owner;
+  IF v_owner_protection IS NOT NULL AND v_owner_protection > now() THEN
+    RAISE EXCEPTION '对方处于免战期，暂时无法攻城';
+  END IF;
+
+  -- 1b. 防刷：对同一目标城池的攻城设有冷却（60 秒内不可重复），并扣除行动点
+  SELECT created_at INTO v_last_siege_at
+    FROM sieges
+   WHERE attacker_user_id = v_caller
+     AND target_city_id = p_target_city_id
+     AND status IN ('pending', 'resolved')
+   ORDER BY created_at DESC
+   LIMIT 1;
+  IF v_last_siege_at IS NOT NULL
+     AND now() - v_last_siege_at < interval '60 seconds' THEN
+    RAISE EXCEPTION 'resolve_siege: 冷却中，60 秒内不能重复进攻同一城池';
+  END IF;
+
+  -- 行动点门槛与扣除（每 10 分钟恢复 1 点；消耗=ACTION_COSTS.challenge=2，
+  -- 恢复公式镜像 resolve_pvp 的 spendActionPoints，服务器权威防绕过）
+  SELECT current, max, last_recovered_at
+    INTO v_ap_current, v_ap_max, v_ap_last
+    FROM action_points
+   WHERE user_id = v_caller;
+  IF v_ap_current IS NULL THEN
+    RAISE EXCEPTION 'resolve_siege: 行动力数据不存在';
+  END IF;
+  v_ap_elapsed := EXTRACT(EPOCH FROM (now() - v_ap_last));
+  v_ap_periods := floor(v_ap_elapsed / 600)::integer;  -- 600 秒 = 10 分钟恢复 1 点
+  IF v_ap_current + v_ap_periods < 2 THEN
+    RAISE EXCEPTION 'resolve_siege: 行动点不足';
+  END IF;
+  v_ap_new_last := v_ap_last + make_interval(secs => v_ap_periods * 600);
+  UPDATE action_points
+     SET current = LEAST(v_ap_max, v_ap_current + v_ap_periods) - 2,
+         last_recovered_at = v_ap_new_last
+   WHERE user_id = v_caller;
+
+  -- 2. 复用或新建攻击方对目标城池的 pending 攻城记录（同一方向尚无 pending 则补建一条）
+  SELECT id INTO v_siege_id
+    FROM sieges
+   WHERE attacker_user_id = v_caller
+     AND target_city_id = p_target_city_id
+     AND status = 'pending'
+   ORDER BY created_at DESC
+   LIMIT 1;
+  IF v_siege_id IS NULL THEN
+    INSERT INTO sieges (id, attacker_user_id, target_city_id, status)
+    VALUES (gen_random_uuid()::text, v_caller, p_target_city_id, 'pending')
+    RETURNING id INTO v_siege_id;
+  END IF;
+
+  -- 3. 战力：armyPower = SUM(count × troop_stats.power)
+  SELECT COALESCE(SUM(u.count * COALESCE(ts.power, 0)), 0)
+    INTO v_att_army
+    FROM army_units u
+    LEFT JOIN troop_stats ts ON ts.soldier_level = u.soldier_level
+   WHERE u.general_id = p_attacker_general_id;
+  SELECT COALESCE(SUM(u.count * COALESCE(ts.power, 0)), 0)
+    INTO v_def_army
+    FROM army_units u
+    LEFT JOIN troop_stats ts ON ts.soldier_level = u.soldier_level
+   WHERE u.general_id = v_def_general_id;
+
+  -- 武器阶（原始 tier），随后用部队最高兵种等级封顶（effectiveWeaponTier）
+  SELECT tier INTO v_att_weapon_tier FROM weapons WHERE id = v_att_weapon_id;
+  SELECT tier INTO v_def_weapon_tier FROM weapons WHERE id = v_def_weapon_id;
+
+  -- 部队最高兵种等级：封顶武器有效阶，防止高阶武器挂低阶兵时攻城战力高于 PvE。
+  SELECT COALESCE(MAX(soldier_level), 0) INTO v_att_max_level
+    FROM army_units WHERE general_id = p_attacker_general_id;
+  SELECT COALESCE(MAX(soldier_level), 0) INTO v_def_max_level
+    FROM army_units WHERE general_id = v_def_general_id;
+  IF v_att_weapon_tier IS NOT NULL AND v_att_max_level > 0 THEN
+    v_att_weapon_tier := LEAST(v_att_weapon_tier, v_att_max_level);
+  ELSE
+    v_att_weapon_tier := NULL;
+  END IF;
+  IF v_def_weapon_tier IS NOT NULL AND v_def_max_level > 0 THEN
+    v_def_weapon_tier := LEAST(v_def_weapon_tier, v_def_max_level);
+  ELSE
+    v_def_weapon_tier := NULL;
+  END IF;
+
+  -- generalMultiplier = 1 + (level-1)*0.05 + (stars-1)*0.10
+  v_att_mult := 1 + (v_att_level - 1) * 0.05 + (v_att_stars - 1) * 0.10;
+  v_def_mult := 1 + (v_def_level - 1) * 0.05 + (v_def_stars - 1) * 0.10;
+
+  -- generalSidePower = multiplier × armyPower + weaponBonus（每阶 +50，用封顶后的有效阶）
+  v_att_power := v_att_mult * v_att_army + COALESCE(v_att_weapon_tier, 0) * 50;
+  v_def_power := v_def_mult * v_def_army + COALESCE(v_def_weapon_tier, 0) * 50;
+
+  -- 4. 胜率：winProbability（logistic，slope=2.0；含 combat.ts 边界情况）
+  IF v_def_power <= 0 THEN
+    v_win_prob := CASE WHEN v_att_power <= 0 THEN 0.5 ELSE 1 END;
+  ELSIF v_att_power <= 0 THEN
+    v_win_prob := 0;
+  ELSE
+    v_win_prob := 1 / (1 + exp(-2.0 * ln(v_att_power / v_def_power)));
+  END IF;
+
+  -- 5. 胜负判定：城池攻防无平局——均势时胜率恰为 0.5，由种子随机定胜负
+  v_seed := abs(hashtext(p_attacker_general_id || '|' || p_target_city_id || '|' || v_siege_id)::bigint);
+  v_rand := (v_seed % 1000000) / 1000000.0;
+  v_attacker_won := v_rand < v_win_prob;
+  IF v_attacker_won THEN
+    v_result := 'attacker_win';
+  ELSE
+    v_result := 'attacker_lose';
+  END IF;
+
+  -- 6. 战损率：胜方 15%、败方 70%
+  IF v_attacker_won THEN
+    v_att_rate := 0.15;
+    v_def_rate := 0.70;
+  ELSE
+    v_att_rate := 0.70;
+    v_def_rate := 0.15;
+  END IF;
+
+  -- 6b. 战损：对「侧总兵数」向下取整后按各兵堆占比成比例分配（镜像 allocate_casualties）
+  v_att_casualties := allocate_casualties(p_attacker_general_id, v_att_rate);
+  v_def_casualties := allocate_casualties(v_def_general_id, v_def_rate);
+
+  -- 7. 攻击方获胜：转移城池所有权 + 掠夺资源（镜像 wildlandDrop 思路：守军战力/10，至少 1）
+  IF v_attacker_won THEN
+    UPDATE cities SET owner_user_id = v_caller WHERE id = p_target_city_id;
+    v_plunder := GREATEST(1, round(v_def_power / 10)::integer);
+    INSERT INTO resources (user_id, food, iron, rare, gold)
+    VALUES (v_caller, v_plunder, 0, 0, v_plunder)
+    ON CONFLICT (user_id) DO UPDATE
+      SET food = resources.food + EXCLUDED.food,
+          gold = resources.gold + EXCLUDED.gold;
+  END IF;
+
+  -- 8. 写 PvP 战斗记录 + 双方战报（每名玩家各一条；攻防即 challenger/target）
+  v_att_power_int := round(v_att_power)::integer;
+  v_def_power_int := round(v_def_power)::integer;
+  v_log := jsonb_build_object(
+    'attacker', jsonb_build_object('general_id', p_attacker_general_id, 'power', v_att_power_int, 'casualties', v_att_casualties),
+    'defender', jsonb_build_object('general_id', v_def_general_id, 'power', v_def_power_int, 'casualties', v_def_casualties),
+    'win_prob', round(v_win_prob::numeric, 4),
+    'result', v_result
+  );
+
+  INSERT INTO pvp_battle_instances (id, challenger_general_id, target_general_id, challenger_user_id, target_user_id, challenger_power, target_power, winner, challenger_casualties, target_casualties, result, log, created_at)
+  VALUES (gen_random_uuid()::text, p_attacker_general_id, v_def_general_id, v_att_user, v_city_owner, v_att_power_int, v_def_power_int, CASE WHEN v_attacker_won THEN 'challenger' ELSE 'target' END, v_att_casualties, v_def_casualties, CASE WHEN v_attacker_won THEN 'challenger_win' ELSE 'challenger_lose' END, v_log, now())
+  RETURNING id INTO v_battle_id;
+
+  -- 攻击方战报：victory = 攻击方胜
+  INSERT INTO pvp_battle_reports (id, user_id, general_id, battle_instance_id, opponent_general_id, victory, attacker_casualties, defender_casualties, log, created_at)
+  VALUES (gen_random_uuid()::text, v_att_user, p_attacker_general_id, v_battle_id, v_def_general_id, v_attacker_won, v_att_casualties, v_def_casualties, v_log, now());
+  -- 守方战报：victory = 攻击方败
+  INSERT INTO pvp_battle_reports (id, user_id, general_id, battle_instance_id, opponent_general_id, victory, attacker_casualties, defender_casualties, log, created_at)
+  VALUES (gen_random_uuid()::text, v_city_owner, v_def_general_id, v_battle_id, p_attacker_general_id, NOT v_attacker_won, v_att_casualties, v_def_casualties, v_log, now());
+
+  -- 9. 更新攻城记录为已结算，写胜负摘要
+  v_summary := jsonb_build_object(
+    'siege_id', v_siege_id,
+    'battle_instance_id', v_battle_id,
+    'result', v_result,
+    'city_captured', v_attacker_won,
+    'plunder_gold', v_plunder,
+    'attacker', jsonb_build_object('general_id', p_attacker_general_id, 'power', v_att_power_int, 'casualties', v_att_casualties),
+    'defender', jsonb_build_object('general_id', v_def_general_id, 'power', v_def_power_int, 'casualties', v_def_casualties)
+  );
+  UPDATE sieges SET status = 'resolved', result = v_result, resolved_at = now()
+   WHERE id = v_siege_id;
+
+  -- 10. 返回摘要
+  RETURN v_summary;
+
+EXCEPTION WHEN OTHERS THEN
+  -- 子事务自动回滚后重抛，保证整体原子性
+  RAISE;
 END;
 $$;
