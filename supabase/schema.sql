@@ -801,7 +801,12 @@ CREATE TABLE sieges (
   resolved_at timestamptz
 );
 ALTER TABLE sieges ENABLE ROW LEVEL SECURITY;
-CREATE POLICY sieges_select ON sieges FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY sieges_select ON sieges FOR SELECT USING (
+  auth.uid() IN (
+    attacker_user_id,
+    (SELECT owner_user_id FROM cities WHERE id = target_city_id)
+  )
+);
 CREATE POLICY sieges_insert ON sieges FOR INSERT WITH CHECK (auth.uid() = attacker_user_id);
 CREATE POLICY sieges_delete ON sieges FOR DELETE USING (auth.uid() = attacker_user_id);
 
@@ -1212,7 +1217,8 @@ $$;
 -- 与 resolve_pvp 的差异：
 --   1) 城池攻防无平局：均势时胜率恰为 0.5，由种子随机定胜负，sieges.result 仅两种；
 --   2) 守方武将非入参：取城池主人麾下最早创建的一名武将作为守将（确定性默认）；
---   3) 攻击方胜出后：转移 cities.owner_user_id + 按守军战力掠夺 resources（gold/food）。
+--   3) 攻击方胜出后：转移 cities.owner_user_id + 掠夺守方 resources（gold/food）——
+--      掠夺为「转移」而非铸币：从守方扣除实际可掠量，等额加到攻击方，防经济通膨。
 -- 胜负判定种子：abs(hashtext(攻击方武将 id | 城池 id | 攻城 id))，模拟 combat.ts mulberry32。
 -- 防刷：同城池 60 秒冷却 + 扣除 2 行动点（镜像 resolve_pvp）。
 -- 事务原子性：plpgsql 内不允许显式 COMMIT/ROLLBACK，EXCEPTION 子句为函数主体建立
@@ -1237,7 +1243,6 @@ DECLARE
   v_city_owner uuid;
   -- 守城武将（城池主人麾下最早创建的一名）
   v_def_general_id text;
-  v_def_user uuid;
   v_def_level integer;
   v_def_stars integer;
   v_def_weapon_id text;
@@ -1274,6 +1279,11 @@ DECLARE
   v_def_casualties integer := 0;
   -- 掠夺量（依守军战力换算）
   v_plunder integer := 0;
+  -- 守方当前资源与实际掠夺量（转移而非铸币，守方不足时掠其实际所有）
+  v_def_food integer := 0;
+  v_def_gold integer := 0;
+  v_plundered_food integer := 0;
+  v_plundered_gold integer := 0;
   -- 攻城记录
   v_siege_id text;
   -- 战斗记录
@@ -1311,8 +1321,8 @@ BEGIN
   END IF;
 
   -- 守城武将：城池主人麾下最早创建的一名（攻城不指定守将，取确定性默认）
-  SELECT id, user_id, level, stars, weapon_id
-    INTO v_def_general_id, v_def_user, v_def_level, v_def_stars, v_def_weapon_id
+  SELECT id, level, stars, weapon_id
+    INTO v_def_general_id, v_def_level, v_def_stars, v_def_weapon_id
     FROM generals
    WHERE user_id = v_city_owner
    ORDER BY created_at, id
@@ -1449,14 +1459,34 @@ BEGIN
   v_def_casualties := allocate_casualties(v_def_general_id, v_def_rate);
 
   -- 7. 攻击方获胜：转移城池所有权 + 掠夺资源（镜像 wildlandDrop 思路：守军战力/10，至少 1）
+  --    掠夺为「转移」而非铸币：从守方 resources 扣除实际可掠量，再等额加到攻击方，
+  --    防止凭空铸币造成经济通膨；守方存量不足则掠其实际所有（保底 0）。
   IF v_attacker_won THEN
     UPDATE cities SET owner_user_id = v_caller WHERE id = p_target_city_id;
     v_plunder := GREATEST(1, round(v_def_power / 10)::integer);
-    INSERT INTO resources (user_id, food, iron, rare, gold)
-    VALUES (v_caller, v_plunder, 0, 0, v_plunder)
-    ON CONFLICT (user_id) DO UPDATE
-      SET food = resources.food + EXCLUDED.food,
-          gold = resources.gold + EXCLUDED.gold;
+    -- 读取守方当前资源（无行视为 0）
+    SELECT COALESCE(food, 0), COALESCE(gold, 0)
+      INTO v_def_food, v_def_gold
+      FROM resources
+     WHERE user_id = v_city_owner;
+    -- 实际掠夺量 = 计划量 与 守方存量 的较小值（不足则掠其实际所有）
+    v_plundered_food := LEAST(v_plunder, v_def_food);
+    v_plundered_gold := LEAST(v_plunder, v_def_gold);
+    -- 扣守方（存量 > 0 才更新，避免对无资源行做无意义写）
+    IF v_def_food > 0 OR v_def_gold > 0 THEN
+      UPDATE resources
+         SET food = GREATEST(0, food - v_plundered_food),
+             gold = GREATEST(0, gold - v_plundered_gold)
+       WHERE user_id = v_city_owner;
+    END IF;
+    -- 等额加到攻击方（实际掠夺 > 0 才写）
+    IF v_plundered_food > 0 OR v_plundered_gold > 0 THEN
+      INSERT INTO resources (user_id, food, iron, rare, gold)
+      VALUES (v_caller, v_plundered_food, 0, 0, v_plundered_gold)
+      ON CONFLICT (user_id) DO UPDATE
+        SET food = resources.food + EXCLUDED.food,
+            gold = resources.gold + EXCLUDED.gold;
+    END IF;
   END IF;
 
   -- 8. 写 PvP 战斗记录 + 双方战报（每名玩家各一条；攻防即 challenger/target）
@@ -1486,7 +1516,8 @@ BEGIN
     'battle_instance_id', v_battle_id,
     'result', v_result,
     'city_captured', v_attacker_won,
-    'plunder_gold', v_plunder,
+    'plunder_food', v_plundered_food,
+    'plunder_gold', v_plundered_gold,
     'attacker', jsonb_build_object('general_id', p_attacker_general_id, 'power', v_att_power_int, 'casualties', v_att_casualties),
     'defender', jsonb_build_object('general_id', v_def_general_id, 'power', v_def_power_int, 'casualties', v_def_casualties)
   );

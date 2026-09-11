@@ -573,7 +573,7 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
                   type="button"
                   className="act kind"
                   disabled={sieging}
-                  onClick={() => void handleSiege(selectedEnemyCity.cityId!)}
+                  onClick={() => selectedEnemyCity.cityId && void handleSiege(selectedEnemyCity.cityId)}
                 >
                   {sieging ? '攻城中…' : '攻城'}
                 </button>
