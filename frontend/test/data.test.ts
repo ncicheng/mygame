@@ -25,6 +25,8 @@ import {
   leaveGuild,
   initiateChallenge,
   fetchChallenges,
+  initiateSiege,
+  fetchSieges,
   fetchProtection,
   refreshWildlands,
   fetchNickname,
@@ -106,6 +108,19 @@ function makeFakeSupabase(
           ? (raw as { data: unknown; error?: { message: string } | null; count?: number | null })
           : { data: raw };
       let data = resolved.data;
+      // .order() 会对行数组真正排序（按列 + ascending），否则排序分支测不出来。
+      const orderCall = calls.filter((c) => c.method === 'order').at(-1);
+      if (orderCall && Array.isArray(data)) {
+        const [col, opts] = orderCall.args as [string, { ascending?: boolean }];
+        const asc = opts?.ascending ?? true;
+        data = (data as Record<string, unknown>[]).slice().sort((a, b) => {
+          const av = a[col] as string | number;
+          const bv = b[col] as string | number;
+          if (av < bv) return asc ? -1 : 1;
+          if (av > bv) return asc ? 1 : -1;
+          return 0;
+        });
+      }
       const usedSingle = calls.some((c) => c.method === 'single' || c.method === 'maybeSingle');
       if (usedSingle && Array.isArray(data)) {
         data = data[0];
@@ -613,17 +628,18 @@ test('fetchChallenges 读自己相关的挑战并映射', async () => {
   });
   const list = await fetchChallenges(USER, client);
   assert.equal(list.length, 2);
+  // fetchChallenges 按 created_at 倒序，c2（2020-01-02，较新）应排在最前。
   assert.deepEqual(list[0], {
-    id: 'c1',
-    challengerUserId: USER,
-    targetUserId: 'u2',
-    status: 'pending',
-    result: null,
-    resultSummary: null,
-    createdAt: '2020-01-01T00:00:00.000Z',
+    id: 'c2',
+    challengerUserId: 'u2',
+    targetUserId: USER,
+    status: 'resolved',
+    result: 'challenger_win',
+    resultSummary: { result: 'challenger_win' },
+    createdAt: '2020-01-02T00:00:00.000Z',
   });
-  assert.equal(list[1].result, 'challenger_win');
-  assert.deepEqual(list[1].resultSummary, { result: 'challenger_win' });
+  assert.equal(list[1].result, null);
+  assert.equal(list[1].resultSummary, null);
   assert.ok(callsOf('challenges').some((c) => c.method === 'or'), '应按或条件过滤双方');
 });
 
@@ -724,4 +740,65 @@ test('fetchTerritory 失败时抛中文 Error', async () => {
     cities: { data: null, error: { message: 'boom' } },
   });
   await assert.rejects(() => fetchTerritory(USER, 'w1', client), /读取领地失败/);
+});
+
+test('initiateSiege 插入 pending sieges 行并调用 resolve_siege', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    sieges: { data: null, error: null },
+  });
+  await initiateSiege(USER, 'ag1', 'c1', client);
+
+  const ins = callsOf('sieges').find((c) => c.method === 'insert');
+  assert.ok(ins, '应插入 sieges');
+  const row = ins!.args[0] as Record<string, unknown>;
+  assert.equal(row.attacker_user_id, USER);
+  assert.equal(row.target_city_id, 'c1');
+  assert.equal(row.status, 'pending');
+
+  const rpcCall = callsOf('rpc').find((c) => (c.args[0] as string) === 'resolve_siege');
+  assert.ok(rpcCall, '应调用 resolve_siege');
+  assert.deepEqual(rpcCall!.args[1], { p_attacker_general_id: 'ag1', p_target_city_id: 'c1' });
+});
+
+test('initiateSiege resolve_siege 失败时删除刚插入的 pending 行并抛错', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    sieges: { data: [{ id: 'sX' }], error: null },
+    rpc: { data: null, error: { message: 'boom' } },
+  });
+
+  await assert.rejects(() => initiateSiege(USER, 'ag1', 'c1', client), /结算攻城失败/);
+
+  const del = callsOf('sieges').find((c) => c.method === 'delete');
+  assert.ok(del, 'RPC 失败后应删除插入的 sieges 行');
+  const idEq = callsOf('sieges').find((c) => c.method === 'eq' && c.args[0] === 'id');
+  assert.equal(idEq?.args[1], 'sX', '应按插入的 id 删除 pending 行');
+});
+
+test('fetchSieges 读取自己的攻城记录并映射', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    sieges: [
+      { id: 's1', attacker_user_id: USER, target_city_id: 'c1', status: 'pending', result: null, created_at: '2020-01-01T00:00:00Z' },
+      { id: 's2', attacker_user_id: USER, target_city_id: 'c2', status: 'resolved', result: 'attacker_win', created_at: '2020-01-02T00:00:00Z' },
+    ],
+  });
+  const list = await fetchSieges(USER, client);
+  assert.equal(list.length, 2);
+  // fetchSieges 按 created_at 倒序，s2（2020-01-02，较新）应排在最前。
+  assert.deepEqual(list[0], {
+    id: 's2',
+    attackerUserId: USER,
+    targetCityId: 'c2',
+    status: 'resolved',
+    result: 'attacker_win',
+    createdAt: '2020-01-02T00:00:00.000Z',
+  });
+  assert.equal(list[1].result, null);
+  assert.ok(callsOf('sieges').some((c) => c.method === 'eq' && c.args[0] === 'attacker_user_id' && c.args[1] === USER), '应按 attacker_user_id 过滤');
+});
+
+test('fetchSieges 失败时抛中文 Error', async () => {
+  const { client } = makeFakeSupabase({
+    sieges: { data: null, error: { message: 'boom' } },
+  });
+  await assert.rejects(() => fetchSieges(USER, client), /读取攻城记录失败/);
 });

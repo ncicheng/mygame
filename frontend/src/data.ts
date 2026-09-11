@@ -574,6 +574,77 @@ export async function initiateChallenge(
   }
 }
 
+/** 攻城记录领域对象。camelCase 字段映射 sieges 表 snake_case 列。 */
+export interface Siege {
+  id: string;
+  attackerUserId: string;
+  targetCityId: string;
+  status: string;
+  result: string | null;
+  createdAt: string;
+}
+
+/**
+ * 发起攻城：先落一条 pending sieges 行（RLS 要求攻击方本人插入），
+ * 再调 resolve_siege（SECURITY DEFINER）做服务器权威结算，由该 RPC 复用/结算该行。
+ */
+export async function initiateSiege(
+  userId: string,
+  attackerGeneralId: string,
+  targetCityId: string,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { data: inserted, error } = await client
+    .from('sieges')
+    .insert({
+      id: crypto.randomUUID(),
+      attacker_user_id: userId,
+      target_city_id: targetCityId,
+      status: 'pending',
+    })
+    .select('id')
+    .single();
+  if (error) throw new Error(`发起攻城失败：${error.message}`);
+  const insertedId = inserted?.id;
+
+  const { error: rpcErr } = await client.rpc('resolve_siege', {
+    p_attacker_general_id: attackerGeneralId,
+    p_target_city_id: targetCityId,
+  });
+  if (rpcErr) {
+    // RPC 失败时回滚刚插入的 pending 行，避免孤儿攻城一直出现在列表。
+    // RLS 允许本人删除自己插入的 sieges 行，删除失败则放弃（best-effort），照常抛原始 RPC 错误。
+    if (insertedId) {
+      const { error: delErr } = await client.from('sieges').delete().eq('id', insertedId);
+      if (delErr) {
+        console.warn(`回滚失败：无法删除攻城记录 ${insertedId}：${delErr.message}`);
+      }
+    }
+    throw new Error(`结算攻城失败：${rpcErr.message}`);
+  }
+}
+
+/** 读取本人发起的攻城记录，按创建时间倒序。 */
+export async function fetchSieges(
+  userId: string,
+  client: SupabaseClient = supabase,
+): Promise<Siege[]> {
+  const { data, error } = await client
+    .from('sieges')
+    .select('id,attacker_user_id,target_city_id,status,result,created_at')
+    .eq('attacker_user_id', userId)
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(`读取攻城记录失败：${error.message}`);
+  return (data ?? []).map((r) => ({
+    id: r.id,
+    attackerUserId: r.attacker_user_id,
+    targetCityId: r.target_city_id,
+    status: r.status,
+    result: r.result,
+    createdAt: new Date(r.created_at).toISOString(),
+  }));
+}
+
 /** 读取与本人相关（作为挑战者或被挑战者）的挑战，按创建时间倒序。 */
 export async function fetchChallenges(
   userId: string,

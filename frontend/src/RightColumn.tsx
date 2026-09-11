@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { BattleReport, Resources } from '@mygame/shared';
 import type { QuestState } from './quests';
-import type { Challenge, Guild, GuildMember } from './data';
+import type { Challenge, Guild, GuildMember, Siege } from './data';
 
 interface RightColumnProps {
   /** 当前玩家 id（用于判定盟主本人 / 控制退出按钮） */
@@ -14,6 +14,10 @@ interface RightColumnProps {
   reports: BattleReport[];
   /** PvP 挑战列表（与本人相关的挑战，按时间倒序） */
   challenges: Challenge[];
+  /** 本人发起的攻城记录（按时间倒序） */
+  sieges: Siege[];
+  /** 城池 id → 名称（攻城卡展示目标城名用） */
+  cityNameById: Record<string, string>;
   quests: QuestState;
   /** 点击某条战报时打开战斗回放 */
   onOpenReport(report: BattleReport): void;
@@ -41,6 +45,8 @@ export function RightColumn({
   memberNicknames,
   reports,
   challenges,
+  sieges,
+  cityNameById,
   quests,
   onOpenReport,
   peaceProtectionUntil,
@@ -110,6 +116,23 @@ export function RightColumn({
               </div>
             );
           })
+        )}
+      </section>
+
+      <section className="card">
+        <h4>🏯 攻城</h4>
+        {sieges.length === 0 ? (
+          <div className="trow"><span>暂无攻城（选中敌方城池可发起）</span></div>
+        ) : (
+          sieges.slice(0, 8).map((s) => (
+            <div className="trow" key={s.id}>
+              <span className="challenge-info">
+                <span>{siegeBadge(s)}</span>
+                <span className="hint">{cityNameById[s.targetCityId] ?? s.targetCityId}</span>
+              </span>
+              <span className="n hint">{new Date(s.createdAt).toLocaleTimeString()}</span>
+            </div>
+          ))
         )}
       </section>
 
@@ -207,6 +230,13 @@ function challengeBadge(c: Challenge, userId: string): string {
   }
   if (perspective === 'draw') return `${prefix} · 平局`;
   return `${prefix} · ${perspective === 'challenger_win' ? '挑战获胜' : '挑战失败'}`;
+}
+
+/** 攻城徽标：攻城者恒为本人，故结果直读 attacker_win / attacker_lose。 */
+function siegeBadge(s: Siege): string {
+  if (s.status !== 'resolved' || !s.result) return '⚔ 待结算';
+  if (s.result === 'attacker_win') return '🏆 攻城获胜 · 已占领';
+  return '💀 攻城失败';
 }
 
 /** 从 result_summary 提取当前玩家视角的战力/战损摘要文案；无摘要返回 null。 */
