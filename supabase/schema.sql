@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS generals (
 );
 
 -- 补齐 weapons -> generals 的循环外键（原迁移补丁）
+ALTER TABLE weapons DROP CONSTRAINT IF EXISTS weapons_general_id_fkey;
 ALTER TABLE weapons
   ADD CONSTRAINT weapons_general_id_fkey FOREIGN KEY (general_id)
   REFERENCES generals(id) ON DELETE SET NULL;
@@ -217,6 +218,7 @@ CREATE TABLE IF NOT EXISTS marches (
 );
 
 -- 同一武将同时只允许一条 active 行军（原迁移补丁）
+DROP INDEX IF EXISTS marches_general_id_active_unique;
 CREATE UNIQUE INDEX marches_general_id_active_unique
   ON marches (general_id)
   WHERE status = 'active';
@@ -806,7 +808,8 @@ INSERT INTO troop_stats (soldier_level, power) VALUES
   (12, 12),
   (13, 13),
   (14, 14),
-  (15, 15);
+  (15, 15)
+ON CONFLICT (soldier_level) DO NOTHING;
 
 -- =============================================================
 -- 19. PvP 战斗记录（battle_instances/battle_reports 为野地 PvE 专用：
