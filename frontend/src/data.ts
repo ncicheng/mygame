@@ -328,31 +328,19 @@ export async function fetchWorld(
     .order('created_at');
   if (armyErr) throw new Error(`读取部队失败：${armyErr.message}`);
 
-  // 收集需要展示昵称/等级的拥有者 id（城池拥有者 + 部队将领），批量拉取后供地图标记使用
+  // 收集需要展示昵称/等级的拥有者 id（城池拥有者 + 部队将领），批量经 RPC 获取
   const ownerIds = new Set<string>();
   for (const c of cityRows ?? []) ownerIds.add(c.owner_user_id);
   for (const r of armyRows ?? []) ownerIds.add(r.user_id);
+  // 昵称/等级经 SECURITY DEFINER 函数返回，绕过 profiles 的 RLS 限制，保证地图标记可显示
   const userInfo: Record<string, { nickname: string | null; level: number | null }> = {};
   if (ownerIds.size > 0) {
     const ownerList = [...ownerIds];
-    const { data: nickRows, error: nickErr } = await client
-      .from('profiles')
-      .select('user_id,username')
-      .in('user_id', ownerList);
-    if (!nickErr) {
-      for (const n of nickRows ?? []) {
-        const cur = userInfo[n.user_id] ?? { nickname: null, level: null };
-        userInfo[n.user_id] = { ...cur, nickname: n.username };
-      }
-    }
-    const { data: genRows, error: genErr } = await client
-      .from('generals')
-      .select('user_id,level')
-      .in('user_id', ownerList);
-    if (!genErr) {
-      for (const g of genRows ?? []) {
-        const cur = userInfo[g.user_id] ?? { nickname: null, level: null };
-        userInfo[g.user_id] = { ...cur, level: g.level };
+    const { data, error } = await client.rpc('get_players_display', { p_ids: ownerList });
+    if (error) throw new Error(`读取玩家信息失败：${error.message}`);
+    if (data && typeof data === 'object') {
+      for (const [uid, info] of Object.entries(data as Record<string, { nickname?: string | null; level?: number | null }>)) {
+        userInfo[uid] = { nickname: info?.nickname ?? null, level: info?.level ?? null };
       }
     }
   }
@@ -1351,6 +1339,16 @@ export async function adminAddGuildMember(
 ): Promise<void> {
   const { error } = await client.rpc('admin_add_guild_member', { p_guild_id: guildId, p_user_id: userId });
   if (error) throw new Error(`添加军团成员失败：${error.message}`);
+}
+
+/** 重置用户行动点数（可设具体值，刷新恢复起点）。 */
+export async function adminSetActionPoints(
+  userId: string,
+  current: number,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client.rpc('admin_set_action_points', { p_user_id: userId, p_current: current });
+  if (error) throw new Error(`重置行动点失败：${error.message}`);
 }
 
 // ---------------------------------------------------------------------------

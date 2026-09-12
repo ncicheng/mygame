@@ -42,6 +42,7 @@ import {
   adminSetAdmin,
   adminGetParams,
   adminSetParam,
+  adminSetActionPoints,
 } from '../src/data.js';
 import type { CombatResult, CombatUnit } from '@mygame/shared';
 
@@ -944,6 +945,14 @@ test('adminSetParam 调 RPC 并传键值', async () => {
   const rpcCall = callsOf('rpc').find((c) => (c.args[0] as string) === 'admin_set_param');
   assert.ok(rpcCall, '应调用 admin_set_param');
   assert.deepEqual(rpcCall!.args[1], { p_key: 'max_level', p_value: '5' });
+});
+
+test('adminSetActionPoints 调 RPC 并传用户与点数', async () => {
+  const { client, callsOf } = makeFakeSupabase({});
+  await adminSetActionPoints(USER, 5, client);
+  const rpcCall = callsOf('rpc').find((c) => (c.args[0] as string) === 'admin_set_action_points');
+  assert.ok(rpcCall, '应调用 admin_set_action_points');
+  assert.deepEqual(rpcCall!.args[1], { p_user_id: USER, p_current: 5 });
 });
 
 test('admin RPC 失败时抛中文 Error', async () => {

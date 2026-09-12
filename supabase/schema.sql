@@ -2048,3 +2048,55 @@ EXCEPTION WHEN OTHERS THEN
   RAISE;
 END;
 $$;
+
+-- -------------------------------------------------------------
+-- 24. get_players_display：批量返回玩家昵称/武将等级（地图标记用，SECURITY DEFINER 绕过 RLS）
+-- -------------------------------------------------------------
+-- 昵称对共享世界的敌我双方本就是公开信息（地图/军团/敌人可见），用只读安全函数统一返回，
+-- 避免客户端对 profiles 的直读依赖 RLS 是否开放。仅返回昵称与等级，不含任何敏感字段。
+CREATE OR REPLACE FUNCTION get_players_display(p_ids uuid[])
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT coalesce(
+    jsonb_object_agg(
+      u.user_id,
+      jsonb_build_object('nickname', p.username, 'level', gl.level)
+    ),
+    '{}'::jsonb
+  )
+  FROM unnest(p_ids) AS u(user_id)
+  LEFT JOIN profiles p ON p.user_id = u.user_id
+  LEFT JOIN LATERAL (
+    SELECT g.level FROM generals g
+     WHERE g.user_id = u.user_id
+     ORDER BY g.created_at, g.id LIMIT 1
+  ) gl ON true;
+$$;
+
+-- -------------------------------------------------------------
+-- 24b. admin_set_action_points：重置用户行动点数（可设具体值，刷新恢复起点）
+-- -------------------------------------------------------------
+CREATE OR REPLACE FUNCTION admin_set_action_points(p_user_id uuid, p_current int)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin) THEN
+    RAISE EXCEPTION '无管理员权限';
+  END IF;
+
+  INSERT INTO action_points (user_id, current, max, last_recovered_at)
+  VALUES (p_user_id, GREATEST(0, p_current), 5, now())
+  ON CONFLICT (user_id) DO UPDATE
+    SET current = GREATEST(0, p_current),
+        last_recovered_at = now();
+EXCEPTION WHEN OTHERS THEN
+  RAISE;
+END;
+$$;

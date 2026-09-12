@@ -9,6 +9,7 @@ import {
   adminListGuilds,
   adminListUsers,
   adminRenameGuild,
+  adminSetActionPoints,
   adminSetAdmin,
   adminSetGeneral,
   adminSetNickname,
@@ -92,6 +93,8 @@ function UserRow({ user, onChanged }: { user: AdminUserRow; onChanged(): void })
   const [nickname, setNickname] = useState(user.nickname ?? '');
   // 免战期（小时；空表示不操作）
   const [peaceHours, setPeaceHours] = useState('');
+  // 行动点数（空表示不操作）
+  const [actionPoints, setActionPoints] = useState('');
   // 反馈
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -199,6 +202,17 @@ function UserRow({ user, onChanged }: { user: AdminUserRow; onChanged(): void })
           onSubmit={() => {
             if (peaceHours.trim() === '') return;
             void run(() => adminSetPeaceProtection(user.id, toInt(peaceHours)), `已设置免战期 ${toInt(peaceHours)} 小时`);
+          }}
+        />
+        <FieldInput
+          label="行动点数"
+          value={actionPoints}
+          placeholder="如 5"
+          onChange={setActionPoints}
+          disabled={busy}
+          onSubmit={() => {
+            if (actionPoints.trim() === '') return;
+            void run(() => adminSetActionPoints(user.id, toInt(actionPoints)), `已重置行动点为 ${toInt(actionPoints)}`);
           }}
         />
       </div>
