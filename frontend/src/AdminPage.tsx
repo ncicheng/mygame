@@ -1,0 +1,387 @@
+import { useCallback, useEffect, useState } from 'react';
+import {
+  adminAdjustResources,
+  adminGetParams,
+  adminListUsers,
+  adminSetAdmin,
+  adminSetGeneral,
+  adminSetNickname,
+  adminSetParam,
+  adminSetTroopUnlock,
+  adminSetWeaponTier,
+} from './data';
+
+// admin_list_users 返回的单行结构（字段与 schema.sql 的 admin_list_users 一致）
+interface AdminUserRow {
+  id: string;
+  email: string | null;
+  nickname: string | null;
+  is_admin: boolean;
+  general_level: number | null;
+  general_stars: number | null;
+  weapon_tier: number | null;
+  food: number | null;
+  iron: number | null;
+  rare: number | null;
+  gold: number | null;
+  troop_max_unlocked: number | null;
+}
+
+/** 后台管理页 Props。 */
+interface AdminPageProps {
+  onClose(): void;
+}
+
+/** 通用行内编辑字段：标签 + 输入框 + 按钮。 */
+interface FieldInputProps {
+  label: string;
+  value: string;
+  placeholder?: string;
+  onChange(v: string): void;
+  onSubmit(): void;
+  disabled?: boolean;
+}
+
+/** 单个行内编辑字段（输入框 + 提交按钮）。 */
+function FieldInput({ label, value, placeholder, onChange, onSubmit, disabled }: FieldInputProps) {
+  return (
+    <label className="admin-field">
+      <span>{label}</span>
+      <span className="admin-field-row">
+        <input
+          type="text"
+          className="mg-input"
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') onSubmit();
+          }}
+        />
+        <button type="button" className="mg-btn" onClick={onSubmit} disabled={disabled}>
+          设置
+        </button>
+      </span>
+    </label>
+  );
+}
+
+/** 用户行编辑卡片：各操作独立输入 + 调用 admin 函数后刷新列表，行内展示成功/失败。 */
+function UserRow({ user, onChanged }: { user: AdminUserRow; onChanged(): void }) {
+  // 武将等级/星级
+  const [level, setLevel] = useState(String(user.general_level ?? 1));
+  const [stars, setStars] = useState(String(user.general_stars ?? 1));
+  // 武器阶
+  const [weaponTier, setWeaponTier] = useState(String(user.weapon_tier ?? 1));
+  // 兵种解锁
+  const [troopUnlock, setTroopUnlock] = useState(String(user.troop_max_unlocked ?? 1));
+  // 资源增量（delta，可负）
+  const [foodDelta, setFoodDelta] = useState('0');
+  const [ironDelta, setIronDelta] = useState('0');
+  const [rareDelta, setRareDelta] = useState('0');
+  const [goldDelta, setGoldDelta] = useState('0');
+  // 昵称
+  const [nickname, setNickname] = useState(user.nickname ?? '');
+  // 反馈
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // 解析整数输入；空串或非法 → 0
+  const toInt = (v: string): number => {
+    const n = parseInt(v, 10);
+    return Number.isNaN(n) ? 0 : n;
+  };
+
+  // 统一执行某管理操作：成功刷新列表，失败显示行内错误
+  const run = useCallback(
+    async (action: () => Promise<void>, okText: string) => {
+      setBusy(true);
+      setErr(null);
+      try {
+        await action();
+        setMsg(okText);
+        onChanged();
+      } catch (e) {
+        setMsg(null);
+        setErr(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onChanged],
+  );
+
+  const num = (v: number | null) => (v == null ? '—' : v);
+
+  return (
+    <div className="admin-user-card mg-card">
+      <div className="admin-user-head">
+        <span className="admin-user-name">
+          {user.nickname || user.email || '未命名用户'}
+          {user.is_admin && <span className="admin-badge">管理员</span>}
+        </span>
+        <span className="admin-user-id">id: {user.id}</span>
+        <button
+          type="button"
+          className="mg-btn ghost"
+          disabled={busy}
+          onClick={() =>
+            void run(() => adminSetAdmin(user.id, !user.is_admin), `已${user.is_admin ? '撤销' : '授予'}管理员`)
+          }
+        >
+          {user.is_admin ? '撤销管理员' : '设为管理员'}
+        </button>
+      </div>
+
+      <div className="admin-user-overview">
+        <span>邮箱：{user.email ?? '—'}</span>
+        <span>武将：Lv.{num(user.general_level)} 星{num(user.general_stars)}</span>
+        <span>武器阶：{num(user.weapon_tier)}</span>
+        <span>兵种解锁：Lv.{num(user.troop_max_unlocked)}</span>
+        <span>
+          资源：粮{num(user.food)} 铁{num(user.iron)} 稀{num(user.rare)} 金{num(user.gold)}
+        </span>
+      </div>
+
+      <div className="admin-edit-grid">
+        <FieldInput label="武将等级" value={level} onChange={setLevel} disabled={busy}
+          onSubmit={() => void run(() => adminSetGeneral(user.id, toInt(level), toInt(stars)), '已设置武将等级/星级')} />
+        <FieldInput label="武将星级" value={stars} onChange={setStars} disabled={busy}
+          onSubmit={() => void run(() => adminSetGeneral(user.id, toInt(level), toInt(stars)), '已设置武将等级/星级')} />
+        <FieldInput label="武器阶" value={weaponTier} onChange={setWeaponTier} disabled={busy}
+          onSubmit={() => void run(() => adminSetWeaponTier(user.id, toInt(weaponTier)), '已设置武器阶')} />
+        <FieldInput label="兵种解锁" value={troopUnlock} onChange={setTroopUnlock} disabled={busy}
+          onSubmit={() => void run(() => adminSetTroopUnlock(user.id, toInt(troopUnlock)), '已设置兵种解锁')} />
+        <FieldInput label="昵称" value={nickname} onChange={setNickname} disabled={busy}
+          onSubmit={() => void run(() => adminSetNickname(user.id, nickname), '已修改昵称')} />
+      </div>
+
+      <div className="admin-resource-adjust">
+        <span className="admin-resource-label">资源增量：</span>
+        <input type="text" className="mg-input" value={foodDelta} placeholder="粮" onChange={(e) => setFoodDelta(e.target.value)} />
+        <input type="text" className="mg-input" value={ironDelta} placeholder="铁" onChange={(e) => setIronDelta(e.target.value)} />
+        <input type="text" className="mg-input" value={rareDelta} placeholder="稀" onChange={(e) => setRareDelta(e.target.value)} />
+        <input type="text" className="mg-input" value={goldDelta} placeholder="金" onChange={(e) => setGoldDelta(e.target.value)} />
+        <button
+          type="button"
+          className="mg-btn"
+          disabled={busy}
+          onClick={() =>
+            void run(
+              () =>
+                adminAdjustResources(user.id, toInt(foodDelta), toInt(ironDelta), toInt(rareDelta), toInt(goldDelta)),
+              '已调整资源',
+            )
+          }
+        >
+          调整资源
+        </button>
+      </div>
+
+      {msg && <div className="admin-feedback ok">{msg}</div>}
+      {err && <div className="admin-feedback err">{err}</div>}
+    </div>
+  );
+}
+
+/** 参数面板：列出/编辑/新增 game_params。 */
+function ParamsPanel({ params, onChanged }: { params: Record<string, unknown>; onChanged(): void }) {
+  // key → 编辑中的值（输入为字符串，保存时原样写入）
+  const [edits, setEdits] = useState<Record<string, string>>(() => {
+    const map: Record<string, string> = {};
+    for (const [k, v] of Object.entries(params)) {
+      map[k] = typeof v === 'string' ? v : JSON.stringify(v);
+    }
+    return map;
+  });
+  // 新增参数输入
+  const [newKey, setNewKey] = useState('');
+  const [newValue, setNewValue] = useState('');
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const setEdit = (key: string, value: string) => setEdits((prev) => ({ ...prev, [key]: value }));
+
+  // 保存单条参数
+  const saveParam = useCallback(
+    async (key: string) => {
+      setBusy(true);
+      setErr(null);
+      try {
+        await adminSetParam(key, edits[key] ?? '');
+        setMsg(`已保存参数「${key}」`);
+        onChanged();
+      } catch (e) {
+        setMsg(null);
+        setErr(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [edits, onChanged],
+  );
+
+  // 新增参数
+  const addParam = useCallback(async () => {
+    const key = newKey.trim();
+    if (!key) {
+      setErr('参数名不能为空');
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      await adminSetParam(key, newValue);
+      setMsg(`已新增参数「${key}」`);
+      setNewKey('');
+      setNewValue('');
+      onChanged();
+    } catch (e) {
+      setMsg(null);
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [newKey, newValue, onChanged]);
+
+  const entries = Object.entries(params).sort((a, b) => a[0].localeCompare(b[0]));
+
+  return (
+    <div className="admin-card mg-card">
+      <h3 className="mg-title">参数面板</h3>
+
+      {entries.length === 0 ? (
+        <p className="admin-empty">暂无游戏参数</p>
+      ) : (
+        <div className="admin-param-list">
+          {entries.map(([key]) => (
+            <div className="admin-param-row" key={key}>
+              <span className="admin-param-key">{key}</span>
+              <input
+                type="text"
+                className="mg-input"
+                value={edits[key] ?? ''}
+                onChange={(e) => setEdit(key, e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void saveParam(key);
+                }}
+              />
+              <button type="button" className="mg-btn" disabled={busy} onClick={() => void saveParam(key)}>
+                保存
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="admin-param-add">
+        <span className="admin-resource-label">新增参数：</span>
+        <input
+          type="text"
+          className="mg-input"
+          placeholder="参数名"
+          value={newKey}
+          onChange={(e) => setNewKey(e.target.value)}
+        />
+        <input
+          type="text"
+          className="mg-input"
+          placeholder="值"
+          value={newValue}
+          onChange={(e) => setNewValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void addParam();
+          }}
+        />
+        <button type="button" className="mg-btn" disabled={busy} onClick={() => void addParam()}>
+          新增
+        </button>
+      </div>
+
+      {msg && <div className="admin-feedback ok">{msg}</div>}
+      {err && <div className="admin-feedback err">{err}</div>}
+    </div>
+  );
+}
+
+/** 后台管理页：用户管理 + 参数面板。入口来自 WorldView 的「后台」按钮。 */
+export function AdminPage({ onClose }: AdminPageProps) {
+  // 所有 hooks 置于组件顶部、任何条件 return 之前，避免 hooks 顺序变化导致空白页
+  const [users, setUsers] = useState<AdminUserRow[]>([]);
+  const [params, setParams] = useState<Record<string, unknown>>({});
+  const [loading, setLoading] = useState(true);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+
+  // 加载用户列表 + 游戏参数；失败进入错误态
+  const load = useCallback(async () => {
+    try {
+      const [u, p] = await Promise.all([adminListUsers(), adminGetParams()]);
+      setUsers(u as unknown as AdminUserRow[]);
+      setParams(p);
+      setLoadErr(null);
+    } catch (e) {
+      setLoadErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // 挂载即加载
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // 刷新列表（编辑成功后调用）
+  const handleChanged = useCallback(() => {
+    void load();
+  }, [load]);
+
+  if (loading) {
+    return (
+      <main className="admin-page mg-gradient">
+        <div className="mg-title">正在加载后台数据…</div>
+      </main>
+    );
+  }
+
+  if (loadErr) {
+    return (
+      <main className="admin-page mg-gradient">
+        <div className="admin-load-err">
+          {loadErr}
+          <button type="button" className="mg-btn ghost" onClick={() => void load()}>
+            重试
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="admin-page mg-gradient">
+      <header className="admin-top">
+        <h1 className="mg-title">🎛️ 后台管理</h1>
+        <button type="button" className="mg-btn ghost" onClick={onClose}>
+          返回游戏
+        </button>
+      </header>
+
+      <section className="admin-card mg-card">
+        <h3 className="mg-title">用户管理（{users.length}）</h3>
+        {users.length === 0 ? (
+          <p className="admin-empty">暂无用户</p>
+        ) : (
+          <div className="admin-user-list">
+            {users.map((u) => (
+              <UserRow key={u.id} user={u} onChanged={handleChanged} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <ParamsPanel params={params} onChanged={handleChanged} />
+    </main>
+  );
+}

@@ -3,6 +3,7 @@ import { getCurrentUser, onAuthChange, signOut, type AuthUser } from './auth';
 import { fetchIsAdmin } from './data';
 import { AuthForm } from './AuthForm';
 import { WorldView } from './WorldView';
+import { AdminPage } from './AdminPage';
 import { Tutorial } from './Tutorial';
 import { CopyrightFooter } from './CopyrightFooter';
 import './theme.css';
@@ -12,6 +13,8 @@ function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // 后台管理页开关：管理员点「后台」进入，返回后关闭
+  const [showAdmin, setShowAdmin] = useState(false);
 
   // 根据当前用户刷新管理员状态（未登录则置为 false）
   const refreshIsAdmin = useCallback((u: AuthUser | null) => {
@@ -70,6 +73,7 @@ function App() {
     }
     setUser(null);
     setIsAdmin(false);
+    setShowAdmin(false);
   }, []);
 
   // 首次登录展示新手引导：本地标记未完成则显示覆盖层，完成后写入 localStorage
@@ -84,7 +88,12 @@ function App() {
   return (
     <>
       {!loading && user === null && <AuthForm />}
-      {user !== null && <WorldView user={user} isAdmin={isAdmin} onLogout={handleLogout} />}
+      {user !== null &&
+        (showAdmin ? (
+          <AdminPage onClose={() => setShowAdmin(false)} />
+        ) : (
+          <WorldView user={user} isAdmin={isAdmin} onLogout={handleLogout} onOpenAdmin={() => setShowAdmin(true)} />
+        ))}
       {user !== null && !tutorialDone && <Tutorial onClose={handleTutorialClose} />}
       {loading && user === null && (
         <main className="mg-gradient" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
