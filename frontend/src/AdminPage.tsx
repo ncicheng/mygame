@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   adminAddGuildMember,
   adminAdjustResources,
@@ -223,26 +223,40 @@ function UserRow({ user, onChanged }: { user: AdminUserRow; onChanged(): void })
   );
 }
 
-/** 参数面板：列出/编辑/新增 game_params。 */
+/** 可设置的游戏参数目录（key → 展示信息）。新增玩法参数时在此登记即可出现在面板。 */
+const KNOWN_PARAMS: { key: string; label: string; hint: string; default: string }[] = [
+  {
+    key: 'peace_duration_hours',
+    label: '新用户免战期（小时）',
+    hint: '新注册玩家默认免战时长，0 表示不设免战',
+    default: '24',
+  },
+];
+
+/** 参数面板：列出全部可设置参数（含当前值/默认值），可编辑保存；不提供新增任意键。 */
 function ParamsPanel({ params, onChanged }: { params: Record<string, unknown>; onChanged(): void }) {
-  // key → 编辑中的值（输入为字符串，保存时原样写入）
-  const [edits, setEdits] = useState<Record<string, string>>(() => {
-    const map: Record<string, string> = {};
-    for (const [k, v] of Object.entries(params)) {
-      map[k] = typeof v === 'string' ? v : JSON.stringify(v);
-    }
-    return map;
-  });
-  // 新增参数输入
-  const [newKey, setNewKey] = useState('');
-  const [newValue, setNewValue] = useState('');
+  // 面板要展示的参数项：目录中登记的 + 库里已存在但未登记的其他键（避免隐藏已有数据）
+  const entries = useMemo(() => {
+    const known = KNOWN_PARAMS.map((p) => ({
+      key: p.key,
+      label: p.label,
+      hint: p.hint,
+      value: params[p.key] != null ? String(params[p.key]) : p.default,
+    }));
+    const extra = Object.keys(params)
+      .filter((k) => !KNOWN_PARAMS.some((p) => p.key === k))
+      .sort((a, b) => a.localeCompare(b))
+      .map((k) => ({ key: k, label: k, hint: '未登记参数', value: String(params[k]) }));
+    return [...known, ...extra];
+  }, [params]);
+
+  // key → 编辑中的值
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const setEdit = (key: string, value: string) => setEdits((prev) => ({ ...prev, [key]: value }));
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const setEdit = (key: string, value: string) => setEdits((prev) => ({ ...prev, [key]: value }));
-
-  // 保存单条参数
   const saveParam = useCallback(
     async (key: string) => {
       setBusy(true);
@@ -261,86 +275,40 @@ function ParamsPanel({ params, onChanged }: { params: Record<string, unknown>; o
     [edits, onChanged],
   );
 
-  // 新增参数
-  const addParam = useCallback(async () => {
-    const key = newKey.trim();
-    if (!key) {
-      setErr('参数名不能为空');
-      return;
-    }
-    setBusy(true);
-    setErr(null);
-    try {
-      await adminSetParam(key, newValue);
-      setMsg(`已新增参数「${key}」`);
-      setNewKey('');
-      setNewValue('');
-      onChanged();
-    } catch (e) {
-      setMsg(null);
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }, [newKey, newValue, onChanged]);
-
-  const entries = Object.entries(params).sort((a, b) => a[0].localeCompare(b[0]));
-
   return (
     <div className="admin-card mg-card">
       <h3 className="mg-title">参数面板</h3>
       <p className="admin-empty" style={{ fontSize: 12 }}>
-        键值参数供游戏读取。当前已生效：<code>peace_duration_hours</code>（新用户免战期小时数，默认 24）。
-        其余键可新增，供后续玩法消费。
+        设置游戏可调参数，保存后对后续新玩家生效（如新用户免战期小时数）。
       </p>
 
       {entries.length === 0 ? (
-        <p className="admin-empty">暂无游戏参数</p>
+        <p className="admin-empty">无可设置参数</p>
       ) : (
         <div className="admin-param-list">
-          {entries.map(([key]) => (
-            <div className="admin-param-row" key={key}>
-              <span className="admin-param-key">{key}</span>
+          {entries.map((e) => (
+            <div className="admin-param-row" key={e.key}>
+              <div className="admin-param-meta">
+                <span className="admin-param-key">{e.label}</span>
+                <span className="hint">{e.hint}</span>
+              </div>
               <input
                 type="text"
                 className="mg-input"
-                value={edits[key] ?? ''}
-                onChange={(e) => setEdit(key, e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void saveParam(key);
+                value={edits[e.key] ?? e.value}
+                placeholder={e.value}
+                onChange={(v) => setEdit(e.key, v.target.value)}
+                onKeyDown={(ev) => {
+                  if (ev.key === 'Enter') void saveParam(e.key);
                 }}
               />
-              <button type="button" className="mg-btn" disabled={busy} onClick={() => void saveParam(key)}>
+              <button type="button" className="mg-btn" disabled={busy} onClick={() => void saveParam(e.key)}>
                 保存
               </button>
             </div>
           ))}
         </div>
       )}
-
-      <div className="admin-param-add">
-        <span className="admin-resource-label">新增参数：</span>
-        <input
-          type="text"
-          className="mg-input"
-          placeholder="参数名"
-          value={newKey}
-          onChange={(e) => setNewKey(e.target.value)}
-        />
-        <input
-          type="text"
-          className="mg-input"
-          placeholder="值"
-          value={newValue}
-          onChange={(e) => setNewValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') void addParam();
-          }}
-        />
-        <button type="button" className="mg-btn" disabled={busy} onClick={() => void addParam()}>
-          新增
-        </button>
-      </div>
 
       {msg && <div className="admin-feedback ok">{msg}</div>}
       {err && <div className="admin-feedback err">{err}</div>}

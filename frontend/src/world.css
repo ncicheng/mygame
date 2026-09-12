@@ -1148,3 +1148,22 @@
   line-height: 16px;
   border-radius: 999px;
 }
+
+/* 后台：参数面板元信息（中文名 + 说明纵向堆叠） */
+.admin-param-meta {
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.admin-param-meta .admin-param-key {
+  min-width: 0;
+  font-size: 13px;
+}
+
+.admin-param-meta .hint {
+  color: var(--mg-text-dim);
+  font-size: 11px;
+  word-break: break-all;
+}
