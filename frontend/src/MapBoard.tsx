@@ -14,6 +14,10 @@ export interface BoardMarker {
   ownerName?: string | null;
   /** 拥有者武将等级（城池/部队；野地为空） */
   ownerLevel?: number | null;
+  /** 野地名称（野地标记用） */
+  wildlandName?: string;
+  /** 野地强度（野地标记用） */
+  wildlandStrength?: number;
   /** 部队标记对应的大地图部队（用于选中行军队列） */
   army?: WorldArmy;
   /** 部队是否正在行军 */
@@ -65,7 +69,12 @@ export function buildCells(world: WorldStateResponse): MapCell[] {
     });
   }
   for (const wl of world.wildlands) {
-    push(`${wl.x},${wl.y}`, { kind: 'bandit', label: '野' });
+    push(`${wl.x},${wl.y}`, {
+      kind: 'bandit',
+      label: '野',
+      wildlandName: wl.name,
+      wildlandStrength: wl.strength,
+    });
   }
   for (const a of world.armies) {
     push(`${a.x},${a.y}`, {
@@ -92,11 +101,24 @@ export function buildCells(world: WorldStateResponse): MapCell[] {
   return cells;
 }
 
-/** 描述选中格（状态栏展示用） */
+/** 描述选中格（状态栏展示用）：含拥有者/等级/兵力/野地强度等详细信息 */
 export function describeCell(cell: MapCell): string {
   const terrain = TERRAIN_NAMES[cell.terrain];
-  const labels = cell.markers.map((m) => m.label);
-  return `(${cell.x},${cell.y}) ${terrain}${labels.length > 0 ? ` · ${labels.join(' / ')}` : ''}`;
+  const details = cell.markers.map((m) => {
+    if (m.kind === 'army') {
+      const lv = m.army?.generalLevel != null ? ` Lv.${m.army.generalLevel}` : '';
+      const troop = m.army ? ` · 兵力 ${m.army.troopCount.toLocaleString()}` : '';
+      return `${m.label}${ownerLine(m) ? ` ${ownerLine(m)}` : ''}${lv}${troop}`;
+    }
+    if (m.kind === 'city') {
+      return `${m.label}${ownerLine(m) ? ` ${ownerLine(m)}` : ''}${m.cityName ? `（${m.cityName}）` : ''}`;
+    }
+    if (m.kind === 'bandit') {
+      return `${m.label}${m.wildlandName ? ` ${m.wildlandName}` : ''}${m.wildlandStrength != null ? ` 强度${m.wildlandStrength}` : ''}`;
+    }
+    return m.label;
+  });
+  return `(${cell.x},${cell.y}) ${terrain}${details.length > 0 ? ` · ${details.join(' / ')}` : ''}`;
 }
 
 /** 拥有者展示：昵称 + 等级；缺失时返回空串 */
@@ -158,10 +180,12 @@ export function MapBoard({ world, onCellClick, onArmyClick, selectedArmyId }: Ma
                 }}
                 title={
                   marker.army
-                    ? `${marker.army.generalName}${marker.army.generalLevel != null ? ` Lv.${marker.army.generalLevel}` : ''} · 兵力 ${marker.army.troopCount.toLocaleString()}${ownerLine(marker) ? `\n${ownerLine(marker)}` : ''}${marker.marching ? '（行军途中）' : ''}`
+                    ? `${marker.army.generalName}${marker.army.generalLevel != null ? ` Lv.${marker.army.generalLevel}` : ''} · 兵力 ${marker.army.troopCount.toLocaleString()}\n${ownerLine(marker) || '未知玩家'}${marker.marching ? '\n（行军途中）' : ''}`
                     : marker.kind === 'city'
-                      ? `${marker.cityName ?? ''}${ownerLine(marker) ? `（${ownerLine(marker)}）` : ''}`
-                      : undefined
+                      ? `${marker.cityName ?? '城池'}\n${ownerLine(marker) || '未知玩家'}`
+                      : marker.kind === 'bandit'
+                        ? `${marker.wildlandName ?? '山贼营地'} · 强度 ${marker.wildlandStrength ?? '?'}\n击败掉落稀有材料`
+                        : undefined
                 }
               >
                 {marker.label}

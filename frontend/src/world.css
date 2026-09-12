@@ -1120,3 +1120,31 @@
 .admin-guild-actions .mg-input {
   width: 160px;
 }
+
+/* 后台：军团成员列表 */
+.admin-guild-members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.admin-guild-member {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--mg-text);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(212, 162, 76, 0.25);
+  border-radius: 999px;
+}
+
+/* 迷你按钮（成员移出） */
+.mg-btn.mini {
+  padding: 1px 6px;
+  font-size: 11px;
+  line-height: 16px;
+  border-radius: 999px;
+}

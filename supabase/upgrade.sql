@@ -1308,6 +1308,13 @@ BEGIN
       'leader_user_id', g.leader_user_id,
       'leader_nickname', (SELECT username FROM profiles p WHERE p.user_id = g.leader_user_id),
       'member_count', (SELECT count(*) FROM guild_members gm WHERE gm.guild_id = g.id),
+      'members', (
+        SELECT jsonb_agg(jsonb_build_object(
+          'user_id', gm.user_id,
+          'nickname', (SELECT username FROM profiles p WHERE p.user_id = gm.user_id)
+        ) ORDER BY gm.joined_at)
+        FROM guild_members gm WHERE gm.guild_id = g.id
+      ),
       'created_at', g.created_at
     ) ORDER BY g.created_at)
     FROM guilds g
@@ -1363,6 +1370,25 @@ BEGIN
   END IF;
 
   DELETE FROM guild_members WHERE guild_id = p_guild_id AND user_id = p_user_id;
+EXCEPTION WHEN OTHERS THEN
+  RAISE;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION admin_add_guild_member(p_guild_id text, p_user_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin) THEN
+    RAISE EXCEPTION '无管理员权限';
+  END IF;
+
+  INSERT INTO guild_members (guild_id, user_id)
+  VALUES (p_guild_id, p_user_id)
+  ON CONFLICT (user_id) DO NOTHING;
 EXCEPTION WHEN OTHERS THEN
   RAISE;
 END;
