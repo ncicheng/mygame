@@ -31,7 +31,10 @@ import {
   initiateChallenge,
   initiateSiege,
   joinGuild,
+  kickGuildMember,
   leaveGuild,
+  renameGuild,
+  disbandGuild,
   type Challenge,
   type Guild,
   type GuildMember,
@@ -602,6 +605,42 @@ export function WorldView({ user, isAdmin, onLogout, onOpenAdmin }: WorldViewPro
     [user.id, refreshAll],
   );
 
+  const handleRenameGuild = useCallback(
+    async (guildId: string, name: string) => {
+      try {
+        await renameGuild(guildId, name);
+        await refreshAll(false);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [refreshAll],
+  );
+
+  const handleKickGuildMember = useCallback(
+    async (guildId: string, userId: string) => {
+      try {
+        await kickGuildMember(guildId, userId);
+        await refreshAll(false);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [refreshAll],
+  );
+
+  const handleDisbandGuild = useCallback(
+    async (guildId: string) => {
+      try {
+        await disbandGuild(guildId);
+        await refreshAll(false);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [refreshAll],
+  );
+
   // 选中格上的敌方部队（side='enemy'）；选中敌方时显示"挑战"入口
   const selectedEnemyArmy = selected?.markers.find((m) => m.army?.side === 'enemy')?.army ?? null;
 
@@ -778,6 +817,9 @@ export function WorldView({ user, isAdmin, onLogout, onOpenAdmin }: WorldViewPro
             onCreateGuild={(name) => void handleCreateGuild(name)}
             onJoinGuild={(guildId) => void handleJoinGuild(guildId)}
             onLeaveGuild={(guildId) => void handleLeaveGuild(guildId)}
+            onRenameGuild={(guildId, name) => void handleRenameGuild(guildId, name)}
+            onKickGuildMember={(guildId, userId) => void handleKickGuildMember(guildId, userId)}
+            onDisbandGuild={(guildId) => void handleDisbandGuild(guildId)}
           />
         </aside>
       </div>

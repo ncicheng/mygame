@@ -372,6 +372,9 @@ test('saveBattleResult 按序写战报并结算胜利（资源/野地/武将/行
       targetY: 1,
       victory: true,
       droppedRare: 5,
+      droppedFood: 400,
+      droppedIron: 250,
+      droppedGold: 80,
       army,
     },
     client,
@@ -380,9 +383,12 @@ test('saveBattleResult 按序写战报并结算胜利（资源/野地/武将/行
   assert.ok(callsOf('battle_instances').some((c) => c.method === 'insert'), '应写 battle_instances');
   assert.ok(callsOf('battle_reports').some((c) => c.method === 'insert'), '应写 battle_reports');
 
-  // 资源稀有材料 +5：10 → 15
+  // 资源掉落：稀有 +5、粮 +400、铁 +250、金 +80 → (100+400, 100+250, 10+5, 100+80)
   const resUpd = callsOf('resources').find((c) => c.method === 'update');
   assert.equal((resUpd!.args[0] as object).rare, 15);
+  assert.equal((resUpd!.args[0] as object).food, 500);
+  assert.equal((resUpd!.args[0] as object).iron, 350);
+  assert.equal((resUpd!.args[0] as object).gold, 180);
 
   // 野地标记被攻破
   const wildUpd = callsOf('wildlands').find((c) => c.method === 'update');
@@ -421,7 +427,7 @@ test('saveBattleResult 失败时抛中文 Error', async () => {
         USER,
         GEN,
         result,
-        { worldId: 'w1', wildlandId: 'wl1', wildlandName: 'x', marchId: 'm1', targetX: 1, targetY: 1, victory: true, droppedRare: 1, army: [] },
+        { worldId: 'w1', wildlandId: 'wl1', wildlandName: 'x', marchId: 'm1', targetX: 1, targetY: 1, victory: true, droppedRare: 1, droppedFood: 0, droppedIron: 0, droppedGold: 0, army: [] },
         client,
       ),
     /保存战斗失败/,

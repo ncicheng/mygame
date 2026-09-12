@@ -560,6 +560,39 @@ export async function leaveGuild(
   if (error) throw new Error(`退出军团失败：${error.message}`);
 }
 
+/** 盟主重命名军团（RLS：仅 leader 可改 guilds）。 */
+export async function renameGuild(
+  guildId: string,
+  name: string,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client.from('guilds').update({ name }).eq('id', guildId);
+  if (error) throw new Error(`重命名军团失败：${error.message}`);
+}
+
+/** 盟主解散军团（RLS：仅 leader 可删 guilds；成员行级联删除）。 */
+export async function disbandGuild(
+  guildId: string,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client.from('guilds').delete().eq('id', guildId);
+  if (error) throw new Error(`解散军团失败：${error.message}`);
+}
+
+/** 盟主将某成员移出军团（RLS：leader 策略允许）。 */
+export async function kickGuildMember(
+  guildId: string,
+  userId: string,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client
+    .from('guild_members')
+    .delete()
+    .eq('guild_id', guildId)
+    .eq('user_id', userId);
+  if (error) throw new Error(`移出军团成员失败：${error.message}`);
+}
+
 // ---------------------------------------------------------------------------
 // PvP 挑战
 // ---------------------------------------------------------------------------
@@ -911,6 +944,10 @@ export interface BattleSettlement {
   targetY: number;
   victory: boolean;
   droppedRare: number;
+  /** 打野胜利额外掉落的粮草/铁材/金币（按守军强度换算） */
+  droppedFood: number;
+  droppedIron: number;
+  droppedGold: number;
   /** 战前部队（soldierLevel/count），data 层据此套用胜负战损率写 army_units。 */
   army: CombatUnit[];
 }
@@ -976,7 +1013,11 @@ export async function saveBattleResult(
 
   // 4. 结算
   if (report.victory) {
-    await updateResources(userId, { rare: report.droppedRare }, client);
+    await updateResources(
+      userId,
+      { rare: report.droppedRare, food: report.droppedFood, iron: report.droppedIron, gold: report.droppedGold },
+      client,
+    );
     r = await client
       .from('wildlands')
       .update({ defeated_at: new Date().toISOString() })
