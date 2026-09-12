@@ -1,15 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   adminAdjustResources,
+  adminDeleteGuild,
+  adminDeleteUser,
   adminGetParams,
+  adminListGuilds,
   adminListUsers,
+  adminRenameGuild,
   adminSetAdmin,
   adminSetGeneral,
   adminSetNickname,
   adminSetParam,
+  adminSetPeaceProtection,
   adminSetTroopUnlock,
   adminSetWeaponTier,
 } from './data';
+import type { AdminGuild } from './data';
 
 // admin_list_users 返回的单行结构（字段与 schema.sql 的 admin_list_users 一致）
 interface AdminUserRow {
@@ -82,6 +88,8 @@ function UserRow({ user, onChanged }: { user: AdminUserRow; onChanged(): void })
   const [goldDelta, setGoldDelta] = useState('0');
   // 昵称
   const [nickname, setNickname] = useState(user.nickname ?? '');
+  // 免战期（小时；空表示不操作）
+  const [peaceHours, setPeaceHours] = useState('');
   // 反馈
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -179,6 +187,34 @@ function UserRow({ user, onChanged }: { user: AdminUserRow; onChanged(): void })
         </button>
       </div>
 
+      <div className="admin-edit-grid">
+        <FieldInput
+          label="免战期(小时)"
+          value={peaceHours}
+          placeholder="0 立即结束"
+          onChange={setPeaceHours}
+          disabled={busy}
+          onSubmit={() => {
+            if (peaceHours.trim() === '') return;
+            void run(() => adminSetPeaceProtection(user.id, toInt(peaceHours)), `已设置免战期 ${toInt(peaceHours)} 小时`);
+          }}
+        />
+      </div>
+
+      <div className="admin-danger">
+        <button
+          type="button"
+          className="mg-btn danger"
+          disabled={busy}
+          onClick={() => {
+            if (!window.confirm(`确认删除用户「${user.nickname || user.email || user.id}」？此操作不可恢复！`)) return;
+            void run(() => adminDeleteUser(user.id), '已删除用户');
+          }}
+        >
+          删除用户
+        </button>
+      </div>
+
       {msg && <div className="admin-feedback ok">{msg}</div>}
       {err && <div className="admin-feedback err">{err}</div>}
     </div>
@@ -251,6 +287,10 @@ function ParamsPanel({ params, onChanged }: { params: Record<string, unknown>; o
   return (
     <div className="admin-card mg-card">
       <h3 className="mg-title">参数面板</h3>
+      <p className="admin-empty" style={{ fontSize: 12 }}>
+        键值参数供游戏读取。当前已生效：<code>peace_duration_hours</code>（新用户免战期小时数，默认 24）。
+        其余键可新增，供后续玩法消费。
+      </p>
 
       {entries.length === 0 ? (
         <p className="admin-empty">暂无游戏参数</p>
@@ -306,6 +346,89 @@ function ParamsPanel({ params, onChanged }: { params: Record<string, unknown>; o
   );
 }
 
+/** 军团管理面板：列出全部军团（盟主/成员数），支持重命名与解散。 */
+function GuildsPanel({ guilds, onChanged }: { guilds: AdminGuild[]; onChanged(): void }) {
+  // 每行的重命名输入
+  const [renames, setRenames] = useState<Record<string, string>>({});
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const run = useCallback(
+    async (action: () => Promise<void>, okText: string) => {
+      setBusy(true);
+      setErr(null);
+      try {
+        await action();
+        setMsg(okText);
+        onChanged();
+      } catch (e) {
+        setMsg(null);
+        setErr(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onChanged],
+  );
+
+  return (
+    <div className="admin-card mg-card">
+      <h3 className="mg-title">军团管理（{guilds.length}）</h3>
+      {guilds.length === 0 ? (
+        <p className="admin-empty">暂无军团</p>
+      ) : (
+        <div className="admin-guild-list">
+          {guilds.map((g) => (
+            <div className="admin-guild-row" key={g.id}>
+              <div className="admin-guild-info">
+                <span className="admin-guild-name">{g.name}</span>
+                <span className="hint">👑 {g.leaderNickname ?? g.leaderUserId}</span>
+                <span className="hint">成员 {g.memberCount}</span>
+              </div>
+              <div className="admin-guild-actions">
+                <input
+                  type="text"
+                  className="mg-input"
+                  placeholder="新名称"
+                  value={renames[g.id] ?? ''}
+                  onChange={(e) => setRenames((prev) => ({ ...prev, [g.id]: e.target.value }))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (renames[g.id] ?? '').trim()) {
+                      void run(() => adminRenameGuild(g.id, (renames[g.id] ?? '').trim()), `已重命名「${g.name}」`);
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="mg-btn"
+                  disabled={busy || !(renames[g.id] ?? '').trim()}
+                  onClick={() => void run(() => adminRenameGuild(g.id, (renames[g.id] ?? '').trim()), `已重命名「${g.name}」`)}
+                >
+                  重命名
+                </button>
+                <button
+                  type="button"
+                  className="mg-btn danger"
+                  disabled={busy}
+                  onClick={() => {
+                    if (!window.confirm(`确认解散军团「${g.name}」？成员将全部退出！`)) return;
+                    void run(() => adminDeleteGuild(g.id), `已解散「${g.name}」`);
+                  }}
+                >
+                  解散
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {msg && <div className="admin-feedback ok">{msg}</div>}
+      {err && <div className="admin-feedback err">{err}</div>}
+    </div>
+  );
+}
+
 /** 后台管理页：用户管理 + 参数面板。入口来自 WorldView 的「后台」按钮。 */
 export function AdminPage({ onClose }: AdminPageProps) {
   // 所有 hooks 置于组件顶部、任何条件 return 之前，避免 hooks 顺序变化导致空白页
@@ -313,13 +436,15 @@ export function AdminPage({ onClose }: AdminPageProps) {
   const [params, setParams] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
   const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [guilds, setGuilds] = useState<AdminGuild[]>([]);
 
   // 加载用户列表 + 游戏参数；失败进入错误态
   const load = useCallback(async () => {
     try {
-      const [u, p] = await Promise.all([adminListUsers(), adminGetParams()]);
+      const [u, p, g] = await Promise.all([adminListUsers(), adminGetParams(), adminListGuilds()]);
       setUsers(u as unknown as AdminUserRow[]);
       setParams(p);
+      setGuilds(g);
       setLoadErr(null);
     } catch (e) {
       setLoadErr(e instanceof Error ? e.message : String(e));
@@ -382,6 +507,7 @@ export function AdminPage({ onClose }: AdminPageProps) {
       </section>
 
       <ParamsPanel params={params} onChanged={handleChanged} />
+      <GuildsPanel guilds={guilds} onChanged={handleChanged} />
     </main>
   );
 }

@@ -61,6 +61,7 @@ export function RightColumn({
   onJoinGuild,
   onLeaveGuild,
 }: RightColumnProps) {
+  const [guildSort, setGuildSort] = useState<GuildSortKey>('members');
   const res = resources ?? { food: 0, iron: 0, rare: 0, gold: 0 };
   const protectionLeft = formatProtectionRemaining(peaceProtectionUntil);
   return (
@@ -204,20 +205,37 @@ export function RightColumn({
         ) : (
           <>
             <GuildCreateForm onCreateGuild={onCreateGuild} />
-            <div className="trow"><span>可加入的军团</span></div>
+            <div className="trow">
+              <span>可加入的军团（{guilds.length}）</span>
+              {guilds.length > 1 && (
+                <select
+                  className="mg-select"
+                  value={guildSort}
+                  onChange={(e) => setGuildSort(e.target.value as GuildSortKey)}
+                >
+                  <option value="members">按成员数</option>
+                  <option value="newest">按成立时间</option>
+                  <option value="name">按名称</option>
+                </select>
+              )}
+            </div>
             {guilds.length === 0 ? (
               <div className="trow"><span>暂无其他军团</span></div>
             ) : (
-              guilds.map((g) => (
-                <div className="trow" key={g.id}>
-                  <span>{g.name}</span>
-                  <button
-                    type="button"
-                    className="mg-btn ghost"
-                    onClick={() => onJoinGuild(g.id)}
-                  >
-                    加入
-                  </button>
+              sortGuilds(guilds, guildSort).map((g) => (
+                <div className="trow col" key={g.id}>
+                  <div className="trow">
+                    <span>{g.name}</span>
+                    <span className="hint">👑 {g.leaderName ?? g.leaderUserId}</span>
+                    <span className="hint">成员 {g.memberCount ?? 0}</span>
+                    <button
+                      type="button"
+                      className="mg-btn ghost"
+                      onClick={() => onJoinGuild(g.id)}
+                    >
+                      加入
+                    </button>
+                  </div>
                 </div>
               ))
             )}
@@ -288,9 +306,19 @@ function formatProtectionRemaining(until: string | null): string | null {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+/** 军团列表排序方式。 */
+type GuildSortKey = 'members' | 'newest' | 'name';
+
+/** 按所选方式排序军团列表（成员数降序 / 成立时间降序 / 名称升序）。 */
+function sortGuilds(guilds: Guild[], key: GuildSortKey): Guild[] {
+  const arr = [...guilds];
+  if (key === 'members') return arr.sort((a, b) => (b.memberCount ?? 0) - (a.memberCount ?? 0));
+  if (key === 'name') return arr.sort((a, b) => a.name.localeCompare(b.name, 'zh'));
+  return arr.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
 /** 创建军团的表单：输入名称 + 提交按钮。 */
-function GuildCreateForm({ onCreateGuild }: { onCreateGuild(name: string): void }) {
-  const [name, setName] = useState('');
+function GuildCreateForm({ onCreateGuild }: { onCreateGuild(name: string): void }) {  const [name, setName] = useState('');
   const submit = () => {
     const trimmed = name.trim();
     if (!trimmed) return;

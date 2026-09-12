@@ -306,16 +306,6 @@ export async function fetchWorld(
     .eq('world_id', worldId)
     .order('created_at');
   if (cityErr) throw new Error(`读取城池失败：${cityErr.message}`);
-  // 注意：RLS 的 cities_select 仅返回本人城池，故 side 恒为 'me'，'enemy' 分支不可达。
-  // 这是已接受的 PvE 限制——共享世界里敌方城池当前不可见，代码保留 'enemy' 以便未来开放 PvP。
-  const cities: WorldCity[] = (cityRows ?? []).map((r) => ({
-    id: r.id,
-    name: r.name,
-    x: r.x,
-    y: r.y,
-    side: r.owner_user_id === userId ? 'me' : 'enemy',
-  }));
-
   const { data: wildRows, error: wildErr } = await client
     .from('wildlands')
     .select('id,name,x,y,strength')
@@ -333,12 +323,54 @@ export async function fetchWorld(
 
   const { data: armyRows, error: armyErr } = await client
     .from('generals')
-    .select('id,user_id,name,x,y,created_at')
+    .select('id,user_id,name,level,x,y,created_at')
     .eq('world_id', worldId)
     .order('created_at');
   if (armyErr) throw new Error(`读取部队失败：${armyErr.message}`);
+
+  // 收集需要展示昵称/等级的拥有者 id（城池拥有者 + 部队将领），批量拉取后供地图标记使用
+  const ownerIds = new Set<string>();
+  for (const c of cityRows ?? []) ownerIds.add(c.owner_user_id);
+  for (const r of armyRows ?? []) ownerIds.add(r.user_id);
+  const userInfo: Record<string, { nickname: string | null; level: number | null }> = {};
+  if (ownerIds.size > 0) {
+    const ownerList = [...ownerIds];
+    const { data: nickRows, error: nickErr } = await client
+      .from('profiles')
+      .select('user_id,username')
+      .in('user_id', ownerList);
+    if (!nickErr) {
+      for (const n of nickRows ?? []) {
+        const cur = userInfo[n.user_id] ?? { nickname: null, level: null };
+        userInfo[n.user_id] = { ...cur, nickname: n.username };
+      }
+    }
+    const { data: genRows, error: genErr } = await client
+      .from('generals')
+      .select('user_id,level')
+      .in('user_id', ownerList);
+    if (!genErr) {
+      for (const g of genRows ?? []) {
+        const cur = userInfo[g.user_id] ?? { nickname: null, level: null };
+        userInfo[g.user_id] = { ...cur, level: g.level };
+      }
+    }
+  }
+
+  // 城池：RLS 已开放所有城池可见（cities_select auth.uid() IS NOT NULL），side 依归属区分 me/enemy。
+  const cities: WorldCity[] = (cityRows ?? []).map((r) => ({
+    id: r.id,
+    name: r.name,
+    x: r.x,
+    y: r.y,
+    side: r.owner_user_id === userId ? 'me' : 'enemy',
+    ownerName: userInfo[r.owner_user_id]?.nickname ?? null,
+    ownerLevel: userInfo[r.owner_user_id]?.level ?? null,
+  }));
+
   const armies: WorldArmy[] = [];
-  for (const r of armyRows ?? []) {    const { data: unitRows, error: unitErr } = await client
+  for (const r of armyRows ?? []) {
+    const { data: unitRows, error: unitErr } = await client
       .from('army_units')
       .select('count')
       .eq('general_id', r.id);
@@ -352,6 +384,8 @@ export async function fetchWorld(
       x: r.x,
       y: r.y,
       side: r.user_id === userId ? 'me' : 'enemy',
+      generalLevel: r.level,
+      ownerName: userInfo[r.user_id]?.nickname ?? null,
       troopCount,
       march,
     });
@@ -395,6 +429,10 @@ export interface Guild {
   name: string;
   leaderUserId: string;
   createdAt: string;
+  /** 军团成员数（fetchGuilds 已聚合填充） */
+  memberCount?: number;
+  /** 盟主昵称（fetchGuilds 已聚合填充；缺失为 null） */
+  leaderName?: string | null;
 }
 
 /** 军团成员领域对象。joinedAt 映射 guild_members.joined_at。 */
@@ -404,7 +442,7 @@ export interface GuildMember {
   joinedAt: string;
 }
 
-/** 列出全部军团。 */
+/** 列出全部军团（含成员数与盟主昵称，供排序选择）。 */
 export async function fetchGuilds(
   client: SupabaseClient = supabase,
 ): Promise<Guild[]> {
@@ -413,7 +451,36 @@ export async function fetchGuilds(
     .select('id,name,leader_user_id,created_at')
     .order('created_at');
   if (error) throw new Error(`读取军团失败：${error.message}`);
-  return (data ?? []).map((r) => toGuild(r));
+  const guilds = (data ?? []).map((r) => toGuild(r));
+  if (guilds.length === 0) return guilds;
+
+  const leaderIds = guilds.map((g) => g.leaderUserId);
+
+  // 成员数：按 guild_id 聚合
+  const { data: memberRows, error: mErr } = await client
+    .from('guild_members')
+    .select('guild_id');
+  if (!mErr) {
+    const countMap: Record<string, number> = {};
+    for (const row of memberRows ?? []) {
+      const gid = row.guild_id as string;
+      countMap[gid] = (countMap[gid] ?? 0) + 1;
+    }
+    for (const g of guilds) g.memberCount = countMap[g.id] ?? 0;
+  }
+
+  // 盟主昵称：批量拉取
+  const { data: nickRows, error: nErr } = await client
+    .from('profiles')
+    .select('user_id,username')
+    .in('user_id', leaderIds);
+  if (!nErr) {
+    const nickMap: Record<string, string> = {};
+    for (const row of nickRows ?? []) nickMap[row.user_id as string] = row.username as string;
+    for (const g of guilds) g.leaderName = nickMap[g.leaderUserId] ?? null;
+  }
+
+  return guilds;
 }
 
 /** 读取玩家所属军团：先经 guild_members 反查 guild_id，再读 guilds；无则 null。 */
@@ -1185,6 +1252,82 @@ export async function adminSetParam(
 ): Promise<void> {
   const { error } = await client.rpc('admin_set_param', { p_key: key, p_value: value });
   if (error) throw new Error(`设置游戏参数失败：${error.message}`);
+}
+
+/** 重设用户免战期（小时；0 表示立即结束）。 */
+export async function adminSetPeaceProtection(
+  userId: string,
+  hours: number,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client.rpc('admin_set_peace_protection', { p_user_id: userId, p_hours: hours });
+  if (error) throw new Error(`设置免战期失败：${error.message}`);
+}
+
+/** 删除用户及其全部关联数据（服务器级联）；不能删除管理员自己。 */
+export async function adminDeleteUser(
+  userId: string,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client.rpc('admin_delete_user', { p_user_id: userId });
+  if (error) throw new Error(`删除用户失败：${error.message}`);
+}
+
+/** 管理端军团领域对象。 */
+export interface AdminGuild {
+  id: string;
+  name: string;
+  leaderUserId: string;
+  leaderNickname: string | null;
+  memberCount: number;
+  createdAt: string;
+}
+
+/** 列出全部军团及成员数、盟主昵称（admin_list_guilds 返回 jsonb 数组）。 */
+export async function adminListGuilds(
+  client: SupabaseClient = supabase,
+): Promise<AdminGuild[]> {
+  const { data, error } = await client.rpc('admin_list_guilds');
+  if (error) throw new Error(`读取军团列表失败：${error.message}`);
+  return Array.isArray(data)
+    ? (data as Record<string, unknown>[]).map((r) => ({
+        id: r.id as string,
+        name: r.name as string,
+        leaderUserId: r.leader_user_id as string,
+        leaderNickname: (r.leader_nickname as string | null) ?? null,
+        memberCount: Number(r.member_count ?? 0),
+        createdAt: new Date(r.created_at as string).toISOString(),
+      }))
+    : [];
+}
+
+/** 重命名军团。 */
+export async function adminRenameGuild(
+  guildId: string,
+  name: string,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client.rpc('admin_rename_guild', { p_guild_id: guildId, p_name: name });
+  if (error) throw new Error(`重命名军团失败：${error.message}`);
+}
+
+/** 解散军团（成员行级联删除）。 */
+export async function adminDeleteGuild(
+  guildId: string,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client.rpc('admin_delete_guild', { p_guild_id: guildId });
+  if (error) throw new Error(`解散军团失败：${error.message}`);
+}
+
+/** 将某用户移出某军团。 */
+export async function adminKickGuildMember(
+  guildId: string,
+  userId: string,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client.rpc('admin_kick_guild_member', { p_guild_id: guildId, p_user_id: userId });
+  if (error) throw new Error(`移除军团成员失败：${error.message}`);
 }
 
 // ---------------------------------------------------------------------------

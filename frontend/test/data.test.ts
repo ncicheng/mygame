@@ -82,6 +82,7 @@ function makeFakeSupabase(
       'limit',
       'is',
       'filter',
+      'in',
       'or',
       'single',
       'maybeSingle',
@@ -574,10 +575,22 @@ test('fetchGuilds 列出全部军团', async () => {
       { id: 'g1', name: '铁血', leader_user_id: USER, created_at: '2020-01-01T00:00:00Z' },
       { id: 'g2', name: '兄弟会', leader_user_id: 'u2', created_at: '2020-01-02T00:00:00Z' },
     ],
+    guild_members: [
+      { guild_id: 'g1', user_id: USER },
+      { guild_id: 'g1', user_id: 'u3' },
+    ],
+    profiles: [{ user_id: USER, username: '盟主甲' }],
   });
   const list = await fetchGuilds(client);
   assert.equal(list.length, 2);
-  assert.deepEqual(list[0], { id: 'g1', name: '铁血', leaderUserId: USER, createdAt: '2020-01-01T00:00:00.000Z' });
+  assert.deepEqual(list[0], {
+    id: 'g1',
+    name: '铁血',
+    leaderUserId: USER,
+    createdAt: '2020-01-01T00:00:00.000Z',
+    memberCount: 2,
+    leaderName: '盟主甲',
+  });
   assert.equal(list[1].name, '兄弟会');
 });
 

@@ -9,10 +9,18 @@ interface ActionDeckProps {
   onMarch(): void;
   /** 点击打野按钮时切换打野选择模式（任务 6 接入） */
   onBandit(): void;
+  /** 点击挑战按钮时切换挑战选择模式（选中敌方部队发起） */
+  onChallenge(): void;
+  /** 点击攻城按钮时切换攻城选择模式（选中敌方城池发起） */
+  onSiege(): void;
   /** 是否正处于行军选择模式（高亮出征按钮） */
   marchMode: boolean;
   /** 是否正处于打野选择模式（高亮打野按钮） */
   banditMode: boolean;
+  /** 是否正处于挑战选择模式（高亮挑战按钮） */
+  challengeMode: boolean;
+  /** 是否正处于攻城选择模式（高亮攻城按钮） */
+  siegeMode: boolean;
 }
 
 interface DeckAction {
@@ -28,22 +36,35 @@ const ACTIONS: readonly DeckAction[] = [
   { key: 'march', label: '出征', cost: ACTION_COSTS.march, kind: false, hint: '点击我方部队选择出发，再点目标格下达行军命令' },
   { key: 'recruit', label: '招募', cost: ACTION_COSTS.recruit, kind: true, hint: '消耗基础资源与行动点，为武将补充兵卒' },
   { key: 'bandit', label: '打野', cost: BANDIT_TOTAL_AP, kind: true, hint: '攻打山贼营地（出征 1 + 战斗 2 = 3 行动点），胜利掉落稀有材料' },
-  { key: 'challenge', label: '挑战', cost: 0, kind: true, hint: '「挑战」对战将在后续迭代开放' },
-  { key: 'siege', label: '攻城', cost: ACTION_COSTS.siege, kind: true, hint: '「攻城」军团战将在后续迭代开放' },
+  { key: 'challenge', label: '挑战', cost: ACTION_COSTS.challenge, kind: true, hint: '点击敌方部队发起 1v1 对战' },
+  { key: 'siege', label: '攻城', cost: ACTION_COSTS.siege, kind: true, hint: '点击敌方城池发起军团战' },
 ];
 
 /** 底部行动点操作台：展示各操作消耗，行动点不足时置灰 */
-export function ActionDeck({ ap, onRecruit, onMarch, onBandit, marchMode, banditMode }: ActionDeckProps) {
+export function ActionDeck({
+  ap,
+  onRecruit,
+  onMarch,
+  onBandit,
+  onChallenge,
+  onSiege,
+  marchMode,
+  banditMode,
+  challengeMode,
+  siegeMode,
+}: ActionDeckProps) {
   const [hint, setHint] = useState<string | null>(null);
+  const isOn = (key: string) =>
+    (key === 'march' && marchMode) || (key === 'bandit' && banditMode) || (key === 'challenge' && challengeMode) || (key === 'siege' && siegeMode);
   return (
     <>
       {ACTIONS.map((action) => {
-        const isOn = (action.key === 'march' && marchMode) || (action.key === 'bandit' && banditMode);
+        const isOnState = isOn(action.key);
         return (
         <button
           key={action.key}
           type="button"
-          className={`act${action.kind ? ' kind' : ''}${isOn ? ' act-on' : ''}`}
+          className={`act${action.kind ? ' kind' : ''}${isOnState ? ' act-on' : ''}`}
           disabled={action.cost > ap.current}
           onClick={() => {
             if (action.key === 'recruit') {
@@ -54,6 +75,12 @@ export function ActionDeck({ ap, onRecruit, onMarch, onBandit, marchMode, bandit
             } else if (action.key === 'bandit') {
               setHint('点击我方部队，再点野地目标发起攻打');
               onBandit();
+            } else if (action.key === 'challenge') {
+              setHint('点击地图上的敌方部队发起 1v1 挑战');
+              onChallenge();
+            } else if (action.key === 'siege') {
+              setHint('点击地图上的敌方城池发起攻城');
+              onSiege();
             } else {
               setHint(action.hint);
             }
