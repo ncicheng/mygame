@@ -101,6 +101,10 @@ export interface WorldCity {
   x: number;
   y: number;
   side: Side;
+  /** 城池拥有者昵称；未能取到时为 null */
+  ownerName?: string | null;
+  /** 城池拥有者武将等级；未能取到时为 null */
+  ownerLevel?: number | null;
 }
 
 /** 野地（山贼营地）：可被攻打的目标 */
@@ -120,6 +124,10 @@ export interface WorldArmy {
   y: number;
   side: Side;
   troopCount: number;
+  /** 部队将领等级 */
+  generalLevel?: number;
+  /** 部队拥有者昵称；未能取到时为 null */
+  ownerName?: string | null;
   /** 进行中的行军；无行军时为 null */
   march: WorldMarch | null;
 }
@@ -165,7 +173,8 @@ export const AP_MAX = 5;
 export const AP_RECOVER_MS = 10 * 60 * 1000;
 
 /** 行动点消耗规则（出征/招募/打野/攻城/挑战），招募 Task 4 起使用 */
-export const ACTION_COSTS = { march: 1, recruit: 1, bandit: 2, siege: 3, challenge: 2 } as const;
+// 注：siege 与 challenge 均为 2，与服务器端 resolve_pvp/resolve_siege 的扣除一致。
+export const ACTION_COSTS = { march: 1, recruit: 1, bandit: 2, siege: 2, challenge: 2 } as const;
 
 /** 打野一次完整消耗：出征（行军）1 + 战斗 2 = 3 行动点。前端打野按钮据此置灰，
  * 避免行动点在 2~3 之间时出征成功但战斗扣点失败（best-effort 仍结算）的断头体验。 */

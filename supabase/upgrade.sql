@@ -907,6 +907,7 @@ DECLARE
   v_idx integer;
   v_off integer;
   v_occupied boolean;
+  v_peace_h integer;
 BEGIN
   -- 0. 播种昵称：默认「玩家 + id 前 6 位」（profiles.username UNIQUE）
   --    默认昵称仅 6 位十六进制（约 1600 万种），极端并发下可能撞唯一键。
@@ -993,8 +994,13 @@ BEGIN
   VALUES (NEW.id, 2000, 1000, 0, 500);
   INSERT INTO action_points (user_id, current, max, last_recovered_at)
   VALUES (NEW.id, 5, 5, now());
+  -- 免战期时长从 game_params.peace_duration_hours 读取（后台可调），默认 24 小时
+  v_peace_h := COALESCE(
+    (SELECT NULLIF(value, '')::integer FROM game_params WHERE key = 'peace_duration_hours'),
+    24
+  );
   INSERT INTO progression (user_id, troop_max_unlocked, peace_protection_until)
-  VALUES (NEW.id, 3, now() + interval '24 hours');
+  VALUES (NEW.id, 3, now() + (v_peace_h || ' hours')::interval);
 
   RETURN NEW;
 EXCEPTION WHEN OTHERS THEN
@@ -1235,6 +1241,128 @@ BEGIN
   VALUES (p_key, p_value)
   ON CONFLICT (key) DO UPDATE
     SET value = EXCLUDED.value;
+EXCEPTION WHEN OTHERS THEN
+  RAISE;
+END;
+$$;
+
+-- =============================================================
+-- [N.12] 免战期 / 用户删除 / 军团管理 管理 RPC（SECURITY DEFINER，幂等）
+-- =============================================================
+
+CREATE OR REPLACE FUNCTION admin_set_peace_protection(p_user_id uuid, p_hours int)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin) THEN
+    RAISE EXCEPTION '无管理员权限';
+  END IF;
+
+  INSERT INTO progression (user_id, troop_max_unlocked, peace_protection_until)
+  VALUES (p_user_id, 3, now() + (p_hours || ' hours')::interval)
+  ON CONFLICT (user_id) DO UPDATE
+    SET peace_protection_until = now() + (p_hours || ' hours')::interval;
+EXCEPTION WHEN OTHERS THEN
+  RAISE;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION admin_delete_user(p_user_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin) THEN
+    RAISE EXCEPTION '无管理员权限';
+  END IF;
+  IF p_user_id = auth.uid() THEN
+    RAISE EXCEPTION 'admin_delete_user: 不能删除管理员自己';
+  END IF;
+
+  DELETE FROM auth.users WHERE id = p_user_id;
+EXCEPTION WHEN OTHERS THEN
+  RAISE;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION admin_list_guilds()
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin) THEN
+    RAISE EXCEPTION '无管理员权限';
+  END IF;
+
+  RETURN (
+    SELECT jsonb_agg(jsonb_build_object(
+      'id', g.id,
+      'name', g.name,
+      'leader_user_id', g.leader_user_id,
+      'leader_nickname', (SELECT username FROM profiles p WHERE p.user_id = g.leader_user_id),
+      'member_count', (SELECT count(*) FROM guild_members gm WHERE gm.guild_id = g.id),
+      'created_at', g.created_at
+    ) ORDER BY g.created_at)
+    FROM guilds g
+  );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION admin_rename_guild(p_guild_id text, p_name text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin) THEN
+    RAISE EXCEPTION '无管理员权限';
+  END IF;
+
+  UPDATE guilds SET name = p_name WHERE id = p_guild_id;
+EXCEPTION WHEN unique_violation THEN
+  RAISE EXCEPTION 'admin_rename_guild: 军团名 % 已被占用', p_name;
+WHEN OTHERS THEN
+  RAISE;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION admin_delete_guild(p_guild_id text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin) THEN
+    RAISE EXCEPTION '无管理员权限';
+  END IF;
+
+  DELETE FROM guilds WHERE id = p_guild_id;
+EXCEPTION WHEN OTHERS THEN
+  RAISE;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION admin_kick_guild_member(p_guild_id text, p_user_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin) THEN
+    RAISE EXCEPTION '无管理员权限';
+  END IF;
+
+  DELETE FROM guild_members WHERE guild_id = p_guild_id AND user_id = p_user_id;
 EXCEPTION WHEN OTHERS THEN
   RAISE;
 END;

@@ -97,6 +97,8 @@ export function WorldView({ user, isAdmin, onLogout, onOpenAdmin }: WorldViewPro
   const [recruiting, setRecruiting] = useState(false);
   const [marchMode, setMarchMode] = useState(false);
   const [banditMode, setBanditMode] = useState(false);
+  const [challengeMode, setChallengeMode] = useState(false);
+  const [siegeMode, setSiegeMode] = useState(false);
   const [marchArmyId, setMarchArmyId] = useState<string | null>(null);
   const [marchMsg, setMarchMsg] = useState<string | null>(null);
   const [marchErr, setMarchErr] = useState<string | null>(null);
@@ -354,9 +356,148 @@ export function WorldView({ user, isAdmin, onLogout, onOpenAdmin }: WorldViewPro
     [marchArmyId, user.id, marching],
   );
 
+  // 攻城入口：以本人主武将发起对选中敌方城池的攻城，结算后刷新攻城列表
+  const handleSiege = useCallback(
+    async (targetCityId: string) => {
+      if (sieging || !general) {
+        setSiegeMsg(!general ? '尚未拥有武将，无法发起攻城' : null);
+        return;
+      }
+      setSieging(true);
+      setSiegeMsg(null);
+      try {
+        await initiateSiege(user.id, general.id, targetCityId);
+        await refreshAll(false);
+        setSiegeMsg('攻城已结算，结果见右侧攻城卡');
+        setSelected(null);
+        setSiegeMode(false);
+      } catch (err) {
+        setSiegeMsg(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSieging(false);
+      }
+    },
+    [user.id, general, sieging, refreshAll],
+  );
+
+  // 挑战入口：以本人主武将发起对选中敌方部队的 1v1 PvP 挑战，结算后刷新挑战列表
+  const handleChallenge = useCallback(
+    async (targetGeneralId: string) => {
+      if (challenging || !general) {
+        setChallengeMsg(!general ? '尚未拥有武将，无法发起挑战' : null);
+        return;
+      }
+      setChallenging(true);
+      setChallengeMsg(null);
+      try {
+        await initiateChallenge(user.id, general.id, targetGeneralId);
+        await refreshAll(false);
+        setChallengeMsg('挑战已结算，结果见右侧挑战列表');
+        setSelected(null);
+        setChallengeMode(false);
+      } catch (err) {
+        setChallengeMsg(err instanceof Error ? err.message : String(err));
+      } finally {
+        setChallenging(false);
+      }
+    },
+    [user.id, general, challenging, refreshAll],
+  );
+
+  // 出征/打野模式互斥切换：开启所选模式并关闭其他，避免多模式叠加
+  const handleMarchToggle = useCallback(() => {
+    const next = !marchMode;
+    setMarchMode(next);
+    if (next) {
+      setBanditMode(false);
+      setChallengeMode(false);
+      setSiegeMode(false);
+    }
+    setMarchArmyId(null);
+    setMarchErr(null);
+    setChallengeMsg(null);
+    setSiegeMsg(null);
+  }, [marchMode]);
+
+  const handleBanditToggle = useCallback(() => {
+    const next = !banditMode;
+    setBanditMode(next);
+    if (next) {
+      setMarchMode(false);
+      setChallengeMode(false);
+      setSiegeMode(false);
+    }
+    setMarchArmyId(null);
+    setMarchErr(null);
+    setChallengeMsg(null);
+    setSiegeMsg(null);
+  }, [banditMode]);
+
+  const handleChallengeToggle = useCallback(() => {
+    const next = !challengeMode;
+    setChallengeMode(next);
+    if (next) {
+      setMarchMode(false);
+      setBanditMode(false);
+      setSiegeMode(false);
+      setMarchArmyId(null);
+    }
+    setMarchErr(null);
+    setChallengeMsg(null);
+    setSiegeMsg(null);
+  }, [challengeMode]);
+
+  const handleSiegeToggle = useCallback(() => {
+    const next = !siegeMode;
+    setSiegeMode(next);
+    if (next) {
+      setMarchMode(false);
+      setBanditMode(false);
+      setChallengeMode(false);
+      setMarchArmyId(null);
+    }
+    setMarchErr(null);
+    setChallengeMsg(null);
+    setSiegeMsg(null);
+  }, [siegeMode]);
+
   const handleCellClick = useCallback(
     (cell: MapCell) => {
-      if ((marchMode || banditMode) && marchArmyId) {
+      if (challengeMode) {
+        const enemy = cell.markers.find((m) => m.army?.side === 'enemy')?.army ?? null;
+        if (enemy) {
+          void handleChallenge(enemy.id);
+          return;
+        }
+        setChallengeMsg('请点击敌方部队发起挑战');
+        return;
+      }
+      if (siegeMode) {
+        const enemyCity = cell.markers.find((m) => m.kind === 'city' && m.side === 'enemy');
+        if (enemyCity?.cityId) {
+          void handleSiege(enemyCity.cityId);
+          return;
+        }
+        setSiegeMsg('请点击敌方城池发起攻城');
+        return;
+      }
+      if (marchMode || banditMode) {
+        // 未选部队：若格子上有我军则自动选中，否则给出清晰引导（修复「点了没反应」）
+        if (!marchArmyId) {
+          const myArmy = cell.markers.find((m) => m.army?.side === 'me')?.army ?? null;
+          if (myArmy) {
+            setMarchArmyId(myArmy.id);
+            setMarchMsg(
+              banditMode
+                ? `已选择「${myArmy.generalName}」，点击野地目标攻打`
+                : `已选择「${myArmy.generalName}」，点击地图目标格下达行军`,
+            );
+            setMarchErr(null);
+            return;
+          }
+          setMarchErr(banditMode ? '请先点击我方部队（军）选择出征，再点野地攻打' : '请先点击我方部队（军）选择出征，再点目标格');
+          return;
+        }
         if (banditMode && !cell.markers.some((m) => m.kind === 'bandit')) {
           setMarchErr('请选择野地（山贼营地）目标格发起攻打');
           return;
@@ -367,8 +508,9 @@ export function WorldView({ user, isAdmin, onLogout, onOpenAdmin }: WorldViewPro
       setSelected(cell);
       setMarchErr(null);
       setChallengeMsg(null);
+      setSiegeMsg(null);
     },
-    [marchMode, banditMode, marchArmyId, handleIssueMarch],
+    [marchMode, banditMode, challengeMode, siegeMode, marchArmyId, handleIssueMarch, handleChallenge, handleSiege],
   );
 
   const handleArmyClick = useCallback(
@@ -465,52 +607,6 @@ export function WorldView({ user, isAdmin, onLogout, onOpenAdmin }: WorldViewPro
 
   // 选中格上的敌方城池（side='enemy'）；选中敌方城池时显示"攻城"入口
   const selectedEnemyCity = selected?.markers.find((m) => m.kind === 'city' && m.side === 'enemy') ?? null;
-
-  // 攻城入口：以本人主武将发起对选中敌方城池的攻城，结算后刷新攻城列表
-  const handleSiege = useCallback(
-    async (targetCityId: string) => {
-      if (sieging || !general) {
-        setSiegeMsg(!general ? '尚未拥有武将，无法发起攻城' : null);
-        return;
-      }
-      setSieging(true);
-      setSiegeMsg(null);
-      try {
-        await initiateSiege(user.id, general.id, targetCityId);
-        await refreshAll(false);
-        setSiegeMsg('攻城已结算，结果见右侧攻城卡');
-        setSelected(null);
-      } catch (err) {
-        setSiegeMsg(err instanceof Error ? err.message : String(err));
-      } finally {
-        setSieging(false);
-      }
-    },
-    [user.id, general, sieging, refreshAll],
-  );
-
-  // 挑战入口：以本人主武将发起对选中敌方部队的 1v1 PvP 挑战，结算后刷新挑战列表
-  const handleChallenge = useCallback(
-    async (targetGeneralId: string) => {
-      if (challenging || !general) {
-        setChallengeMsg(!general ? '尚未拥有武将，无法发起挑战' : null);
-        return;
-      }
-      setChallenging(true);
-      setChallengeMsg(null);
-      try {
-        await initiateChallenge(user.id, general.id, targetGeneralId);
-        await refreshAll(false);
-        setChallengeMsg('挑战已结算，结果见右侧挑战列表');
-        setSelected(null);
-      } catch (err) {
-        setChallengeMsg(err instanceof Error ? err.message : String(err));
-      } finally {
-        setChallenging(false);
-      }
-    },
-    [user.id, general, challenging, refreshAll],
-  );
 
   // 城池 id → 名称：攻城卡展示目标城名用（hooks 须无条件调用，world 可为空）
   const cityNameById = useMemo(() => {
@@ -674,20 +770,14 @@ export function WorldView({ user, isAdmin, onLogout, onOpenAdmin }: WorldViewPro
         <ActionDeck
           ap={world.actionPoints}
           onRecruit={() => setRecruiting(true)}
-          onMarch={() => {
-            setMarchMode((m) => !m);
-            setBanditMode(false);
-            setMarchArmyId(null);
-            setMarchErr(null);
-          }}
-          onBandit={() => {
-            setBanditMode((m) => !m);
-            setMarchMode(false);
-            setMarchArmyId(null);
-            setMarchErr(null);
-          }}
+          onMarch={handleMarchToggle}
+          onBandit={handleBanditToggle}
+          onChallenge={handleChallengeToggle}
+          onSiege={handleSiegeToggle}
           marchMode={marchMode}
           banditMode={banditMode}
+          challengeMode={challengeMode}
+          siegeMode={siegeMode}
         />
       </footer>
       <CopyrightFooter />

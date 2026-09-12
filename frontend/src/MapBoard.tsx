@@ -10,6 +10,10 @@ export interface BoardMarker {
   cityId?: string;
   /** 城池名称（攻城结果/入口展示用） */
   cityName?: string;
+  /** 拥有者昵称（城池/部队；野地为空） */
+  ownerName?: string | null;
+  /** 拥有者武将等级（城池/部队；野地为空） */
+  ownerLevel?: number | null;
   /** 部队标记对应的大地图部队（用于选中行军队列） */
   army?: WorldArmy;
   /** 部队是否正在行军 */
@@ -56,6 +60,8 @@ export function buildCells(world: WorldStateResponse): MapCell[] {
       label: c.side === 'me' ? '城' : '敌城',
       cityId: c.id,
       cityName: c.name,
+      ownerName: c.ownerName ?? null,
+      ownerLevel: c.ownerLevel ?? null,
     });
   }
   for (const wl of world.wildlands) {
@@ -91,6 +97,14 @@ export function describeCell(cell: MapCell): string {
   const terrain = TERRAIN_NAMES[cell.terrain];
   const labels = cell.markers.map((m) => m.label);
   return `(${cell.x},${cell.y}) ${terrain}${labels.length > 0 ? ` · ${labels.join(' / ')}` : ''}`;
+}
+
+/** 拥有者展示：昵称 + 等级；缺失时返回空串 */
+export function ownerLine(marker: BoardMarker): string {
+  const parts: string[] = [];
+  if (marker.ownerName) parts.push(marker.ownerName);
+  if (marker.ownerLevel != null) parts.push(`Lv.${marker.ownerLevel}`);
+  return parts.join(' · ');
 }
 
 interface MapBoardProps {
@@ -142,9 +156,18 @@ export function MapBoard({ world, onCellClick, onArmyClick, selectedArmyId }: Ma
                     onArmyClick(marker.army);
                   }
                 }}
-                title={marker.army ? `${marker.army.generalName}${marker.marching ? '（行军途中）' : ''}` : undefined}
+                title={
+                  marker.army
+                    ? `${marker.army.generalName}${marker.army.generalLevel != null ? ` Lv.${marker.army.generalLevel}` : ''} · 兵力 ${marker.army.troopCount.toLocaleString()}${ownerLine(marker) ? `\n${ownerLine(marker)}` : ''}${marker.marching ? '（行军途中）' : ''}`
+                    : marker.kind === 'city'
+                      ? `${marker.cityName ?? ''}${ownerLine(marker) ? `（${ownerLine(marker)}）` : ''}`
+                      : undefined
+                }
               >
                 {marker.label}
+                {(marker.kind === 'army' || marker.kind === 'city') && marker.ownerLevel != null && (
+                  <em className="mk-lv">{marker.ownerLevel}</em>
+                )}
               </span>
             );
           })}
