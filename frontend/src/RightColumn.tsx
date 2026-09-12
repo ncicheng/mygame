@@ -38,6 +38,12 @@ interface RightColumnProps {
   onJoinGuild(guildId: string): void;
   /** 退出指定军团 */
   onLeaveGuild(guildId: string): void;
+  /** 盟主重命名军团 */
+  onRenameGuild(guildId: string, name: string): void;
+  /** 盟主将某成员移出军团 */
+  onKickGuildMember(guildId: string, userId: string): void;
+  /** 盟主解散军团 */
+  onDisbandGuild(guildId: string): void;
 }
 
 /** 右卡片栏：资源卡 + 战报卡 + 任务卡 + 军团卡 */
@@ -60,8 +66,12 @@ export function RightColumn({
   onCreateGuild,
   onJoinGuild,
   onLeaveGuild,
+  onRenameGuild,
+  onKickGuildMember,
+  onDisbandGuild,
 }: RightColumnProps) {
   const [guildSort, setGuildSort] = useState<GuildSortKey>('members');
+  const [guildRename, setGuildRename] = useState('');
   const res = resources ?? { food: 0, iron: 0, rare: 0, gold: 0 };
   const protectionLeft = formatProtectionRemaining(peaceProtectionUntil);
   return (
@@ -188,9 +198,52 @@ export function RightColumn({
             {members.map((m) => (
               <div className="trow" key={m.userId}>
                 <span>{m.userId === myGuild.leaderUserId ? '👑' : '⚔'} {memberNicknames[m.userId] ?? m.userId}</span>
+                {myGuild.leaderUserId === userId && m.userId !== userId && (
+                  <button
+                    type="button"
+                    className="mg-btn ghost mini"
+                    onClick={() => onKickGuildMember(myGuild.id, m.userId)}
+                  >
+                    移出
+                  </button>
+                )}
               </div>
             ))}
-            {myGuild.leaderUserId !== userId && (
+            {myGuild.leaderUserId === userId ? (
+              <>
+                <div className="trow">
+                  <input
+                    type="text"
+                    className="mg-input"
+                    placeholder="新军团名"
+                    value={guildRename}
+                    onChange={(e) => setGuildRename(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="mg-btn ghost"
+                    disabled={!guildRename.trim()}
+                    onClick={() => {
+                      onRenameGuild(myGuild.id, guildRename.trim());
+                      setGuildRename('');
+                    }}
+                  >
+                    重命名
+                  </button>
+                </div>
+                <div className="trow">
+                  <button
+                    type="button"
+                    className="mg-btn danger"
+                    onClick={() => {
+                      if (window.confirm('确认解散军团？成员将全部退出！')) onDisbandGuild(myGuild.id);
+                    }}
+                  >
+                    解散军团
+                  </button>
+                </div>
+              </>
+            ) : (
               <div className="trow">
                 <button
                   type="button"

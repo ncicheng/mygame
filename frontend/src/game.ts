@@ -180,7 +180,11 @@ export async function settleBattle(
   });
 
   const victory = result.attackerWon;
+  // 打野胜利掉落：稀有材料（按守军强度）+ 粮草/铁材/金币（按守军强度换算）
   const droppedRare = victory ? grantWildlandDrop(defenderPower) : 0;
+  const droppedFood = victory ? Math.round(defenderPower * 40) : 0;
+  const droppedIron = victory ? Math.round(defenderPower * 25) : 0;
+  const droppedGold = victory ? Math.round(defenderPower * 8) : 0;
 
   await deps.saveBattleResult(userId, generalId, result, {
     worldId: ctx.worldId,
@@ -191,6 +195,9 @@ export async function settleBattle(
     targetY: ctx.targetY,
     victory,
     droppedRare,
+    droppedFood,
+    droppedIron,
+    droppedGold,
     army: general.army,
   });
 

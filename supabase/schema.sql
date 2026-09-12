@@ -753,6 +753,15 @@ CREATE POLICY guild_members_insert ON guild_members
 DROP POLICY IF EXISTS guild_members_delete ON guild_members;
 CREATE POLICY guild_members_delete ON guild_members
   FOR DELETE USING (auth.uid() = user_id);
+-- 盟主可将本军团任意成员移出（含非本人）
+DROP POLICY IF EXISTS guild_members_delete_leader ON guild_members;
+CREATE POLICY guild_members_delete_leader ON guild_members
+  FOR DELETE USING (
+    EXISTS (
+      SELECT 1 FROM guilds g
+      WHERE g.id = guild_members.guild_id AND g.leader_user_id = auth.uid()
+    )
+  );
 
 -- =============================================================
 -- 17. PvP 挑战（1v1）：发起/结算/取消，结算由 SECURITY DEFINER RPC 写入
