@@ -804,3 +804,206 @@
   border-top: 1px dashed rgba(212, 162, 76, 0.2);
   padding-top: 6px;
 }
+
+/* ==========================================================================
+ * 后台管理页 AdminPage
+ * 全屏覆盖，独立于 .vc 布局；复用 .mg-* 全局类，另加 .admin-* 专有样式。
+ * ========================================================================== */
+.admin-page {
+  min-height: 100vh;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.admin-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.admin-top h1 {
+  margin: 0;
+}
+
+.admin-card {
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.admin-card h3 {
+  margin: 0 0 14px;
+}
+
+.admin-empty {
+  color: var(--mg-text-dim);
+  padding: 8px 0;
+}
+
+.admin-load-err {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: var(--mg-red);
+  font-size: 14px;
+}
+
+/* 用户列表 */
+.admin-user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.admin-user-card {
+  padding: 16px;
+}
+
+.admin-user-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.admin-user-name {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.admin-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--mg-gold);
+  color: var(--mg-gold);
+  font-size: 11px;
+  vertical-align: middle;
+}
+
+.admin-user-id {
+  color: var(--mg-text-dim);
+  font-size: 12px;
+  word-break: break-all;
+  flex: 1;
+}
+
+.admin-user-overview {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  color: var(--mg-text-dim);
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+/* 编辑网格：标签 + 输入 + 按钮 */
+.admin-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.admin-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--mg-text-dim);
+}
+
+.admin-field-row {
+  display: flex;
+  gap: 6px;
+}
+
+.admin-field-row .mg-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-field-row .mg-btn {
+  padding: 8px 12px;
+  white-space: nowrap;
+}
+
+/* 资源增量行 */
+.admin-resource-adjust {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.admin-resource-label {
+  font-size: 12px;
+  color: var(--mg-text-dim);
+}
+
+.admin-resource-adjust .mg-input {
+  width: 72px;
+}
+
+.admin-resource-adjust .mg-btn {
+  padding: 8px 14px;
+}
+
+/* 行内反馈 */
+.admin-feedback {
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.admin-feedback.ok {
+  color: var(--mg-jade);
+}
+
+.admin-feedback.err {
+  color: var(--mg-red);
+}
+
+/* 参数面板 */
+.admin-param-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.admin-param-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin-param-key {
+  min-width: 180px;
+  font-weight: 600;
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.admin-param-row .mg-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-param-row .mg-btn {
+  padding: 8px 16px;
+  white-space: nowrap;
+}
+
+.admin-param-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.admin-param-add .mg-input {
+  width: 180px;
+}

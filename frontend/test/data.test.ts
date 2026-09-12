@@ -32,6 +32,16 @@ import {
   fetchNickname,
   setNickname,
   fetchTerritory,
+  fetchIsAdmin,
+  adminListUsers,
+  adminSetGeneral,
+  adminSetWeaponTier,
+  adminSetTroopUnlock,
+  adminAdjustResources,
+  adminSetNickname,
+  adminSetAdmin,
+  adminGetParams,
+  adminSetParam,
 } from '../src/data.js';
 import type { CombatResult, CombatUnit } from '@mygame/shared';
 
@@ -801,4 +811,131 @@ test('fetchSieges 失败时抛中文 Error', async () => {
     sieges: { data: null, error: { message: 'boom' } },
   });
   await assert.rejects(() => fetchSieges(USER, client), /读取攻城记录失败/);
+});
+
+test('fetchIsAdmin 读取 profiles.is_admin', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    profiles: [{ is_admin: true }],
+  });
+  assert.equal(await fetchIsAdmin(USER, client), true);
+  const sel = callsOf('profiles').find((c) => c.method === 'select');
+  assert.ok(sel, '应读取 profiles');
+  assert.deepEqual(sel!.args[0], 'is_admin');
+  assert.ok(callsOf('profiles').some((c) => c.method === 'eq' && c.args[0] === 'user_id' && c.args[1] === USER));
+});
+
+test('fetchIsAdmin 无 profile 行时返回 false', async () => {
+  const { client } = makeFakeSupabase({
+    profiles: [],
+  });
+  assert.equal(await fetchIsAdmin(USER, client), false);
+});
+
+test('fetchIsAdmin 失败时抛中文 Error', async () => {
+  const { client } = makeFakeSupabase({
+    profiles: { data: null, error: { message: 'no rows' } },
+  });
+  await assert.rejects(() => fetchIsAdmin(USER, client), /读取管理员状态失败/);
+});
+
+test('adminListUsers 调 RPC 并返回用户数组', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    rpc: { data: [{ id: USER, is_admin: true }], error: null },
+  });
+  const list = await adminListUsers(client);
+  assert.deepEqual(list, [{ id: USER, is_admin: true }]);
+  assert.ok(callsOf('rpc').some((c) => (c.args[0] as string) === 'admin_list_users'), '应调用 admin_list_users');
+});
+
+test('adminListUsers 无数据时返回空数组', async () => {
+  const { client } = makeFakeSupabase({
+    rpc: { data: null, error: null },
+  });
+  assert.deepEqual(await adminListUsers(client), []);
+});
+
+test('adminListUsers 失败时抛中文 Error', async () => {
+  const { client } = makeFakeSupabase({
+    rpc: { data: null, error: { message: 'permission denied' } },
+  });
+  await assert.rejects(() => adminListUsers(client), /读取用户列表失败/);
+});
+
+test('adminSetGeneral 调 RPC 并传武将参数', async () => {
+  const { client, callsOf } = makeFakeSupabase({});
+  await adminSetGeneral(USER, 3, 5, client);
+  const rpcCall = callsOf('rpc').find((c) => (c.args[0] as string) === 'admin_set_general');
+  assert.ok(rpcCall, '应调用 admin_set_general');
+  assert.deepEqual(rpcCall!.args[1], { p_user_id: USER, p_level: 3, p_stars: 5 });
+});
+
+test('adminSetWeaponTier 调 RPC 并传武器阶参数', async () => {
+  const { client, callsOf } = makeFakeSupabase({});
+  await adminSetWeaponTier(USER, 2, client);
+  const rpcCall = callsOf('rpc').find((c) => (c.args[0] as string) === 'admin_set_weapon_tier');
+  assert.ok(rpcCall, '应调用 admin_set_weapon_tier');
+  assert.deepEqual(rpcCall!.args[1], { p_user_id: USER, p_tier: 2 });
+});
+
+test('adminSetTroopUnlock 调 RPC 并传解锁等级', async () => {
+  const { client, callsOf } = makeFakeSupabase({});
+  await adminSetTroopUnlock(USER, 4, client);
+  const rpcCall = callsOf('rpc').find((c) => (c.args[0] as string) === 'admin_set_troop_unlock');
+  assert.ok(rpcCall, '应调用 admin_set_troop_unlock');
+  assert.deepEqual(rpcCall!.args[1], { p_user_id: USER, p_max_level: 4 });
+});
+
+test('adminAdjustResources 调 RPC 并传四项资源增量', async () => {
+  const { client, callsOf } = makeFakeSupabase({});
+  await adminAdjustResources(USER, 100, -50, 5, 0, client);
+  const rpcCall = callsOf('rpc').find((c) => (c.args[0] as string) === 'admin_adjust_resources');
+  assert.ok(rpcCall, '应调用 admin_adjust_resources');
+  assert.deepEqual(rpcCall!.args[1], { p_user_id: USER, p_food: 100, p_iron: -50, p_rare: 5, p_gold: 0 });
+});
+
+test('adminSetNickname 调 RPC 并传昵称', async () => {
+  const { client, callsOf } = makeFakeSupabase({});
+  await adminSetNickname(USER, '新昵称', client);
+  const rpcCall = callsOf('rpc').find((c) => (c.args[0] as string) === 'admin_set_nickname');
+  assert.ok(rpcCall, '应调用 admin_set_nickname');
+  assert.deepEqual(rpcCall!.args[1], { p_user_id: USER, p_nickname: '新昵称' });
+});
+
+test('adminSetAdmin 调 RPC 并传管理员标志', async () => {
+  const { client, callsOf } = makeFakeSupabase({});
+  await adminSetAdmin(USER, true, client);
+  const rpcCall = callsOf('rpc').find((c) => (c.args[0] as string) === 'admin_set_admin');
+  assert.ok(rpcCall, '应调用 admin_set_admin');
+  assert.deepEqual(rpcCall!.args[1], { p_user_id: USER, p_is_admin: true });
+});
+
+test('adminGetParams 调 RPC 并返回参数对象', async () => {
+  const { client, callsOf } = makeFakeSupabase({
+    rpc: { data: { max_level: '5' }, error: null },
+  });
+  const params = await adminGetParams(client);
+  assert.deepEqual(params, { max_level: '5' });
+  assert.ok(callsOf('rpc').some((c) => (c.args[0] as string) === 'admin_get_params'), '应调用 admin_get_params');
+});
+
+test('adminGetParams 无数据时返回空对象', async () => {
+  const { client } = makeFakeSupabase({
+    rpc: { data: null, error: null },
+  });
+  assert.deepEqual(await adminGetParams(client), {});
+});
+
+test('adminSetParam 调 RPC 并传键值', async () => {
+  const { client, callsOf } = makeFakeSupabase({});
+  await adminSetParam('max_level', '5', client);
+  const rpcCall = callsOf('rpc').find((c) => (c.args[0] as string) === 'admin_set_param');
+  assert.ok(rpcCall, '应调用 admin_set_param');
+  assert.deepEqual(rpcCall!.args[1], { p_key: 'max_level', p_value: '5' });
+});
+
+test('admin RPC 失败时抛中文 Error', async () => {
+  const { client } = makeFakeSupabase({
+    rpc: { data: null, error: { message: '无管理员权限' } },
+  });
+  await assert.rejects(() => adminSetGeneral(USER, 3, 5, client), /调整武将失败/);
 });

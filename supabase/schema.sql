@@ -64,6 +64,7 @@
 CREATE TABLE profiles (
   user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   username text NOT NULL UNIQUE,
+  is_admin boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
@@ -1529,6 +1530,281 @@ BEGIN
 
 EXCEPTION WHEN OTHERS THEN
   -- 子事务自动回滚后重抛，保证整体原子性
+  RAISE;
+END;
+$$;
+
+-- =============================================================
+-- 23. 管理后台：game_params 表 + 管理员 RPCs（SECURITY DEFINER）
+-- =============================================================
+-- 管理能力分为两块：
+--   a) profiles.is_admin 标志（已在第 1 步建表加入，默认 false）
+--   b) game_params 键值表 + 一组仅管理员可调用的 RPC
+-- 所有管理 RPC 均以 SECURITY DEFINER 执行（表所有者身份，绕过 RLS），
+-- 并在函数体首行校验调用者 is_admin，非管理员一律 RAISE EXCEPTION '无管理员权限'。
+-- 变更类函数沿用 resolve_pvp 的事务原子性写法：plpgsql 内不允许显式
+-- COMMIT/ROLLBACK，EXCEPTION 子句为函数主体建立子事务，异常自动回滚并重抛。
+
+-- -------------------------------------------------------------
+-- 23.1 game_params：游戏参数键值表
+-- -------------------------------------------------------------
+-- 启用 RLS 但「不创建任何策略」：客户端（anon 直连）无法直接读写该表，
+-- 仅 SECURITY DEFINER 管理函数以表所有者身份绕过 RLS 访问，杜绝客户端直改参数。
+CREATE TABLE game_params (
+  key text PRIMARY KEY,
+  value text NOT NULL
+);
+
+ALTER TABLE game_params ENABLE ROW LEVEL SECURITY;
+
+-- -------------------------------------------------------------
+-- 23.2 admin_list_users：列出全部用户及养成概览
+-- -------------------------------------------------------------
+-- 对每个 profiles 用户汇总：email（auth.users）、昵称、武将等级/星级（最早一名）、
+-- 武器阶（最早一件）、资源、部队最高兵种解锁、is_admin。
+-- 用标量子查询取「最早」的武将/武器，避免 LEFT JOIN 多行造成 jsonb_agg 扇出重复。
+CREATE OR REPLACE FUNCTION admin_list_users()
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- 管理员校验：非管理员直接拒绝
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin) THEN
+    RAISE EXCEPTION '无管理员权限';
+  END IF;
+
+  RETURN (
+    SELECT jsonb_agg(jsonb_build_object(
+      'id', p.user_id,
+      'email', u.email,
+      'nickname', p.username,
+      'is_admin', p.is_admin,
+      'general_level', (SELECT g.level FROM generals g WHERE g.user_id = p.user_id ORDER BY g.created_at, g.id LIMIT 1),
+      'general_stars', (SELECT g.stars FROM generals g WHERE g.user_id = p.user_id ORDER BY g.created_at, g.id LIMIT 1),
+      'weapon_tier', (SELECT w.tier FROM weapons w WHERE w.user_id = p.user_id ORDER BY w.id LIMIT 1),
+      'food', r.food,
+      'iron', r.iron,
+      'rare', r.rare,
+      'gold', r.gold,
+      'troop_max_unlocked', pr.troop_max_unlocked
+    ) ORDER BY p.created_at)
+    FROM profiles p
+    LEFT JOIN auth.users u ON u.id = p.user_id
+    LEFT JOIN resources r ON r.user_id = p.user_id
+    LEFT JOIN progression pr ON pr.user_id = p.user_id
+  );
+END;
+$$;
+
+-- -------------------------------------------------------------
+-- 23.3 admin_set_general：调整用户（最早一名）武将等级/星级
+-- -------------------------------------------------------------
+CREATE OR REPLACE FUNCTION admin_set_general(p_user_id uuid, p_level int, p_stars int)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_general_id text;
+BEGIN
+  -- 管理员校验
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin) THEN
+    RAISE EXCEPTION '无管理员权限';
+  END IF;
+
+  -- 取该用户最早创建的武将
+  SELECT id INTO v_general_id FROM generals
+   WHERE user_id = p_user_id
+   ORDER BY created_at, id LIMIT 1;
+
+  IF v_general_id IS NULL THEN
+    RAISE EXCEPTION 'admin_set_general: 用户 % 没有武将', p_user_id;
+  END IF;
+
+  UPDATE generals SET level = p_level, stars = p_stars WHERE id = v_general_id;
+EXCEPTION WHEN OTHERS THEN
+  RAISE;
+END;
+$$;
+
+-- -------------------------------------------------------------
+-- 23.4 admin_set_weapon_tier：调整用户（最早一件）武器阶
+-- -------------------------------------------------------------
+CREATE OR REPLACE FUNCTION admin_set_weapon_tier(p_user_id uuid, p_tier int)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_weapon_id text;
+BEGIN
+  -- 管理员校验
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin) THEN
+    RAISE EXCEPTION '无管理员权限';
+  END IF;
+
+  SELECT id INTO v_weapon_id FROM weapons
+   WHERE user_id = p_user_id
+   ORDER BY id LIMIT 1;
+
+  IF v_weapon_id IS NULL THEN
+    RAISE EXCEPTION 'admin_set_weapon_tier: 用户 % 没有武器', p_user_id;
+  END IF;
+
+  UPDATE weapons SET tier = p_tier WHERE id = v_weapon_id;
+EXCEPTION WHEN OTHERS THEN
+  RAISE;
+END;
+$$;
+
+-- -------------------------------------------------------------
+-- 23.5 admin_set_troop_unlock：upsert 部队最高兵种解锁等级
+-- -------------------------------------------------------------
+CREATE OR REPLACE FUNCTION admin_set_troop_unlock(p_user_id uuid, p_max_level int)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- 管理员校验
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin) THEN
+    RAISE EXCEPTION '无管理员权限';
+  END IF;
+
+  INSERT INTO progression (user_id, troop_max_unlocked)
+  VALUES (p_user_id, p_max_level)
+  ON CONFLICT (user_id) DO UPDATE
+    SET troop_max_unlocked = EXCLUDED.troop_max_unlocked;
+EXCEPTION WHEN OTHERS THEN
+  RAISE;
+END;
+$$;
+
+-- -------------------------------------------------------------
+-- 23.6 admin_adjust_resources：按增量调整资源（可负，下限 0）
+-- -------------------------------------------------------------
+-- 用 upsert 同时覆盖「已有资源行」与「尚无资源行」两种情况：
+--   已有行 → 叠加增量并 GREATEST(0, …) 兜底到 0；
+--   无行   → 以 max(0, 增量) 新建（负数增量视为 0）。
+CREATE OR REPLACE FUNCTION admin_adjust_resources(
+  p_user_id uuid,
+  p_food int,
+  p_iron int,
+  p_rare int,
+  p_gold int
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- 管理员校验
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin) THEN
+    RAISE EXCEPTION '无管理员权限';
+  END IF;
+
+  INSERT INTO resources (user_id, food, iron, rare, gold)
+  VALUES (p_user_id, GREATEST(0, p_food), GREATEST(0, p_iron), GREATEST(0, p_rare), GREATEST(0, p_gold))
+  ON CONFLICT (user_id) DO UPDATE
+    SET food = GREATEST(0, resources.food + EXCLUDED.food),
+        iron = GREATEST(0, resources.iron + EXCLUDED.iron),
+        rare = GREATEST(0, resources.rare + EXCLUDED.rare),
+        gold = GREATEST(0, resources.gold + EXCLUDED.gold);
+EXCEPTION WHEN OTHERS THEN
+  RAISE;
+END;
+$$;
+
+-- -------------------------------------------------------------
+-- 23.7 admin_set_nickname：修改用户昵称（处理 UNIQUE 冲突）
+-- -------------------------------------------------------------
+CREATE OR REPLACE FUNCTION admin_set_nickname(p_user_id uuid, p_nickname text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- 管理员校验
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin) THEN
+    RAISE EXCEPTION '无管理员权限';
+  END IF;
+
+  UPDATE profiles SET username = p_nickname WHERE user_id = p_user_id;
+EXCEPTION WHEN unique_violation THEN
+  -- 昵称撞唯一键：转为清晰的中文报错，避免裸 unique_violation
+  RAISE EXCEPTION 'admin_set_nickname: 昵称 % 已被占用', p_nickname;
+WHEN OTHERS THEN
+  RAISE;
+END;
+$$;
+
+-- -------------------------------------------------------------
+-- 23.8 admin_set_admin：授予/撤销管理员标志
+-- -------------------------------------------------------------
+CREATE OR REPLACE FUNCTION admin_set_admin(p_user_id uuid, p_is_admin boolean)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- 管理员校验
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin) THEN
+    RAISE EXCEPTION '无管理员权限';
+  END IF;
+
+  UPDATE profiles SET is_admin = p_is_admin WHERE user_id = p_user_id;
+EXCEPTION WHEN OTHERS THEN
+  RAISE;
+END;
+$$;
+
+-- -------------------------------------------------------------
+-- 23.9 admin_get_params：返回全部 game_params 为 jsonb 对象
+-- -------------------------------------------------------------
+CREATE OR REPLACE FUNCTION admin_get_params()
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- 管理员校验
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin) THEN
+    RAISE EXCEPTION '无管理员权限';
+  END IF;
+
+  RETURN (SELECT jsonb_object_agg(key, value) FROM game_params);
+END;
+$$;
+
+-- -------------------------------------------------------------
+-- 23.10 admin_set_param：upsert 单条游戏参数
+-- -------------------------------------------------------------
+CREATE OR REPLACE FUNCTION admin_set_param(p_key text, p_value text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- 管理员校验
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = auth.uid() AND is_admin) THEN
+    RAISE EXCEPTION '无管理员权限';
+  END IF;
+
+  INSERT INTO game_params (key, value)
+  VALUES (p_key, p_value)
+  ON CONFLICT (key) DO UPDATE
+    SET value = EXCLUDED.value;
+EXCEPTION WHEN OTHERS THEN
   RAISE;
 END;
 $$;
