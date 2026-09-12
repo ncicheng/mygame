@@ -1273,6 +1273,12 @@ export async function adminDeleteUser(
   if (error) throw new Error(`删除用户失败：${error.message}`);
 }
 
+/** 管理端军团成员。 */
+export interface AdminGuildMember {
+  userId: string;
+  nickname: string | null;
+}
+
 /** 管理端军团领域对象。 */
 export interface AdminGuild {
   id: string;
@@ -1280,10 +1286,11 @@ export interface AdminGuild {
   leaderUserId: string;
   leaderNickname: string | null;
   memberCount: number;
+  members: AdminGuildMember[];
   createdAt: string;
 }
 
-/** 列出全部军团及成员数、盟主昵称（admin_list_guilds 返回 jsonb 数组）。 */
+/** 列出全部军团及成员数、盟主昵称、成员列表（admin_list_guilds 返回 jsonb 数组）。 */
 export async function adminListGuilds(
   client: SupabaseClient = supabase,
 ): Promise<AdminGuild[]> {
@@ -1296,6 +1303,12 @@ export async function adminListGuilds(
         leaderUserId: r.leader_user_id as string,
         leaderNickname: (r.leader_nickname as string | null) ?? null,
         memberCount: Number(r.member_count ?? 0),
+        members: Array.isArray(r.members)
+          ? (r.members as Record<string, unknown>[]).map((m) => ({
+              userId: m.user_id as string,
+              nickname: (m.nickname as string | null) ?? null,
+            }))
+          : [],
         createdAt: new Date(r.created_at as string).toISOString(),
       }))
     : [];
@@ -1328,6 +1341,16 @@ export async function adminKickGuildMember(
 ): Promise<void> {
   const { error } = await client.rpc('admin_kick_guild_member', { p_guild_id: guildId, p_user_id: userId });
   if (error) throw new Error(`移除军团成员失败：${error.message}`);
+}
+
+/** 将某用户加入某军团（仅限未入团用户）。 */
+export async function adminAddGuildMember(
+  guildId: string,
+  userId: string,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client.rpc('admin_add_guild_member', { p_guild_id: guildId, p_user_id: userId });
+  if (error) throw new Error(`添加军团成员失败：${error.message}`);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
+  adminAddGuildMember,
   adminAdjustResources,
   adminDeleteGuild,
   adminDeleteUser,
   adminGetParams,
+  adminKickGuildMember,
   adminListGuilds,
   adminListUsers,
   adminRenameGuild,
@@ -346,10 +348,12 @@ function ParamsPanel({ params, onChanged }: { params: Record<string, unknown>; o
   );
 }
 
-/** 军团管理面板：列出全部军团（盟主/成员数），支持重命名与解散。 */
+/** 军团管理面板：列出全部军团（盟主/成员数/成员列表），支持成员增删、重命名与解散。 */
 function GuildsPanel({ guilds, onChanged }: { guilds: AdminGuild[]; onChanged(): void }) {
   // 每行的重命名输入
   const [renames, setRenames] = useState<Record<string, string>>({});
+  // 每行新增成员的 user_id 输入
+  const [addIds, setAddIds] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -386,6 +390,29 @@ function GuildsPanel({ guilds, onChanged }: { guilds: AdminGuild[]; onChanged():
                 <span className="hint">👑 {g.leaderNickname ?? g.leaderUserId}</span>
                 <span className="hint">成员 {g.memberCount}</span>
               </div>
+
+              <div className="admin-guild-members">
+                {g.members.length === 0 ? (
+                  <span className="hint">（暂无成员）</span>
+                ) : (
+                  g.members.map((m) => (
+                    <span className="admin-guild-member" key={m.userId}>
+                      {m.userId === g.leaderUserId ? '👑' : '⚔'} {m.nickname ?? m.userId}
+                      {m.userId !== g.leaderUserId && (
+                        <button
+                          type="button"
+                          className="mg-btn danger mini"
+                          disabled={busy}
+                          onClick={() => void run(() => adminKickGuildMember(g.id, m.userId), `已移除「${m.nickname ?? m.userId}」`)}
+                        >
+                          移出
+                        </button>
+                      )}
+                    </span>
+                  ))
+                )}
+              </div>
+
               <div className="admin-guild-actions">
                 <input
                   type="text"
@@ -406,6 +433,26 @@ function GuildsPanel({ guilds, onChanged }: { guilds: AdminGuild[]; onChanged():
                   onClick={() => void run(() => adminRenameGuild(g.id, (renames[g.id] ?? '').trim()), `已重命名「${g.name}」`)}
                 >
                   重命名
+                </button>
+                <input
+                  type="text"
+                  className="mg-input"
+                  placeholder="添加成员 user_id"
+                  value={addIds[g.id] ?? ''}
+                  onChange={(e) => setAddIds((prev) => ({ ...prev, [g.id]: e.target.value }))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (addIds[g.id] ?? '').trim()) {
+                      void run(() => adminAddGuildMember(g.id, (addIds[g.id] ?? '').trim()), '已添加成员');
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="mg-btn"
+                  disabled={busy || !(addIds[g.id] ?? '').trim()}
+                  onClick={() => void run(() => adminAddGuildMember(g.id, (addIds[g.id] ?? '').trim()), '已添加成员')}
+                >
+                  添加成员
                 </button>
                 <button
                   type="button"

@@ -699,6 +699,8 @@ export function WorldView({ user, isAdmin, onLogout, onOpenAdmin }: WorldViewPro
               <span className="marchbar">
                 敌方城池「{selectedEnemyCity.cityName ?? selectedEnemyCity.label}」· ({selected!.x},
                 {selected!.y})
+                {selectedEnemyCity.ownerName && ` · ${selectedEnemyCity.ownerName}`}
+                {selectedEnemyCity.ownerLevel != null && ` Lv.${selectedEnemyCity.ownerLevel}`}
                 <button
                   type="button"
                   className="act kind"
@@ -711,6 +713,8 @@ export function WorldView({ user, isAdmin, onLogout, onOpenAdmin }: WorldViewPro
             ) : selectedEnemyArmy ? (
               <span className="marchbar">
                 敌方「{selectedEnemyArmy.generalName}」· 兵力 {selectedEnemyArmy.troopCount.toLocaleString()}
+                {selectedEnemyArmy.ownerName && ` · ${selectedEnemyArmy.ownerName}`}
+                {selectedEnemyArmy.generalLevel != null && ` Lv.${selectedEnemyArmy.generalLevel}`}
                 <button
                   type="button"
                   className="act kind"
