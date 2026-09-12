@@ -173,9 +173,11 @@ export function MapBoard({ world, onCellClick, onArmyClick, selectedArmyId }: Ma
                 key={i}
                 className={classes}
                 onClick={(e) => {
-                  e.stopPropagation();
-                  if (marker.army && marker.army.side === 'me' && onArmyClick) {
-                    onArmyClick(marker.army);
+                  // 仅「我军」标记拦截点击（用于选中行军队列）；其余标记（野地/城池/敌方）
+                  // 不拦截，让事件冒泡到格子按钮，由 onCellClick 统一处理选中/出征/打野/挑战/攻城。
+                  if (marker.army && marker.army.side === 'me') {
+                    e.stopPropagation();
+                    if (onArmyClick) onArmyClick(marker.army);
                   }
                 }}
                 title={
