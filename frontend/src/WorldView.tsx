@@ -632,14 +632,25 @@ export function WorldView({ user, isAdmin, onLogout, onOpenAdmin }: WorldViewPro
     [user.id, reports, sieges, challenges, resources, general],
   );
 
-  if (error || !world) {
+  if (error) {
     return (
       <div className="vc">
         <div className="vc-status vc-status-error">
-          {error ?? '世界加载失败'}{' '}
+          {error}{' '}
           <button type="button" className="act kind" onClick={() => window.location.reload()}>
             重试
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  // 尚未加载完成（world 为空且无错误）时显示加载中，而不是误报失败
+  if (!world) {
+    return (
+      <div className="vc">
+        <div className="vc-status">
+          <span className="spinner" /> 世界加载中…
         </div>
       </div>
     );

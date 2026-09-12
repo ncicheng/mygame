@@ -483,6 +483,23 @@
   color: var(--mg-text-dim);
 }
 
+/* 加载中：旋转圆圈 */
+.vc-status .spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  vertical-align: -3px;
+  border: 2px solid rgba(212, 162, 76, 0.35);
+  border-top-color: var(--mg-gold);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 .vc-status-error {
   color: var(--mg-red);
   display: flex;

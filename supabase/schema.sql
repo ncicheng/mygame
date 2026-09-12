@@ -61,7 +61,7 @@
 -- -------------------------------------------------------------
 -- 1. profiles：玩家展示资料（原 users 的展示部分）
 -- -------------------------------------------------------------
-CREATE TABLE profiles (
+CREATE TABLE IF NOT EXISTS profiles (
   user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   username text NOT NULL UNIQUE,
   is_admin boolean NOT NULL DEFAULT false,
@@ -71,7 +71,7 @@ CREATE TABLE profiles (
 -- -------------------------------------------------------------
 -- 2. worlds：大地图（共享世界）
 -- -------------------------------------------------------------
-CREATE TABLE worlds (
+CREATE TABLE IF NOT EXISTS worlds (
   id text PRIMARY KEY,
   name text NOT NULL,
   width integer NOT NULL,
@@ -83,7 +83,7 @@ CREATE TABLE worlds (
 -- -------------------------------------------------------------
 -- 3. world_tiles：大地图格子（共享世界）
 -- -------------------------------------------------------------
-CREATE TABLE world_tiles (
+CREATE TABLE IF NOT EXISTS world_tiles (
   world_id text NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
   x integer NOT NULL,
   y integer NOT NULL,
@@ -96,7 +96,7 @@ CREATE TABLE world_tiles (
 --    general_id 外键到 generals 为循环引用，故在 generals 建完后
 --    用 ALTER 补上（见第 5 步末尾）。
 -- -------------------------------------------------------------
-CREATE TABLE weapons (
+CREATE TABLE IF NOT EXISTS weapons (
   id text PRIMARY KEY,
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   name text NOT NULL,
@@ -107,7 +107,7 @@ CREATE TABLE weapons (
 -- -------------------------------------------------------------
 -- 5. generals：武将
 -- -------------------------------------------------------------
-CREATE TABLE generals (
+CREATE TABLE IF NOT EXISTS generals (
   id text PRIMARY KEY,
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   name text NOT NULL,
@@ -128,7 +128,7 @@ ALTER TABLE weapons
 -- -------------------------------------------------------------
 -- 6. cities：城池（玩家拥有，owner_user_id 可空表示无主）
 -- -------------------------------------------------------------
-CREATE TABLE cities (
+CREATE TABLE IF NOT EXISTS cities (
   id text PRIMARY KEY,
   world_id text NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
   x integer NOT NULL,
@@ -142,7 +142,7 @@ CREATE TABLE cities (
 -- -------------------------------------------------------------
 -- 7. wildlands：野地（共享，drop/defeated_at 已并入建表）
 -- -------------------------------------------------------------
-CREATE TABLE wildlands (
+CREATE TABLE IF NOT EXISTS wildlands (
   id text PRIMARY KEY,
   world_id text NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
   x integer NOT NULL,
@@ -157,7 +157,7 @@ CREATE TABLE wildlands (
 -- -------------------------------------------------------------
 -- 8. progression：养成进度（每玩家一行）
 -- -------------------------------------------------------------
-CREATE TABLE progression (
+CREATE TABLE IF NOT EXISTS progression (
   user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   troop_max_unlocked integer NOT NULL DEFAULT 3,
   peace_protection_until timestamptz
@@ -166,7 +166,7 @@ CREATE TABLE progression (
 -- -------------------------------------------------------------
 -- 9. resources：玩家资源（每玩家一行）
 -- -------------------------------------------------------------
-CREATE TABLE resources (
+CREATE TABLE IF NOT EXISTS resources (
   user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   food integer NOT NULL,
   iron integer NOT NULL,
@@ -177,7 +177,7 @@ CREATE TABLE resources (
 -- -------------------------------------------------------------
 -- 10. action_points：行动力（每玩家一行）
 -- -------------------------------------------------------------
-CREATE TABLE action_points (
+CREATE TABLE IF NOT EXISTS action_points (
   user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   current integer NOT NULL,
   max integer NOT NULL,
@@ -187,7 +187,7 @@ CREATE TABLE action_points (
 -- -------------------------------------------------------------
 -- 11. army_units：部队（按兵种分档；新增冗余 user_id 以按 owner 隔离）
 -- -------------------------------------------------------------
-CREATE TABLE army_units (
+CREATE TABLE IF NOT EXISTS army_units (
   id text PRIMARY KEY,
   general_id text NOT NULL REFERENCES generals(id) ON DELETE CASCADE,
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -200,7 +200,7 @@ CREATE TABLE army_units (
 -- -------------------------------------------------------------
 -- 12. marches：行军
 -- -------------------------------------------------------------
-CREATE TABLE marches (
+CREATE TABLE IF NOT EXISTS marches (
   id text PRIMARY KEY,
   world_id text NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
   general_id text NOT NULL REFERENCES generals(id) ON DELETE CASCADE,
@@ -224,7 +224,7 @@ CREATE UNIQUE INDEX marches_general_id_active_unique
 -- -------------------------------------------------------------
 -- 13. battle_instances：战斗实例（归属方为 attacker_user_id）
 -- -------------------------------------------------------------
-CREATE TABLE battle_instances (
+CREATE TABLE IF NOT EXISTS battle_instances (
   id text PRIMARY KEY,
   world_id text NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
   attacker_general_id text NOT NULL REFERENCES generals(id) ON DELETE CASCADE,
@@ -244,7 +244,7 @@ CREATE TABLE battle_instances (
 -- -------------------------------------------------------------
 -- 14. battle_reports：战斗报告
 -- -------------------------------------------------------------
-CREATE TABLE battle_reports (
+CREATE TABLE IF NOT EXISTS battle_reports (
   id text PRIMARY KEY,
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   general_id text NOT NULL REFERENCES generals(id) ON DELETE CASCADE,
@@ -283,58 +283,78 @@ ALTER TABLE battle_reports ENABLE ROW LEVEL SECURITY;
 
 -- ---------------- profiles（登录用户可见昵称；读写仅本人） ----------------
 -- 放开 SELECT：登录用户即可读全部昵称（军团成员间互看昵称），但 INSERT/UPDATE/DELETE 仍限本人。
+DROP POLICY IF EXISTS profiles_select ON profiles;
 CREATE POLICY profiles_select ON profiles
   FOR SELECT USING (auth.uid() IS NOT NULL);
+DROP POLICY IF EXISTS profiles_insert ON profiles;
 CREATE POLICY profiles_insert ON profiles
   FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS profiles_update ON profiles;
 CREATE POLICY profiles_update ON profiles
   FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS profiles_delete ON profiles;
 CREATE POLICY profiles_delete ON profiles
   FOR DELETE USING (auth.uid() = user_id);
 
 -- ---------------- worlds / world_tiles（登录可读，禁写） ----------------
+DROP POLICY IF EXISTS worlds_select ON worlds;
 CREATE POLICY worlds_select ON worlds
   FOR SELECT USING (auth.uid() IS NOT NULL);
+DROP POLICY IF EXISTS world_tiles_select ON world_tiles;
 CREATE POLICY world_tiles_select ON world_tiles
   FOR SELECT USING (auth.uid() IS NOT NULL);
 
 -- ---------------- weapons（仅本人） ----------------
+DROP POLICY IF EXISTS weapons_select ON weapons;
 CREATE POLICY weapons_select ON weapons
   FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS weapons_insert ON weapons;
 CREATE POLICY weapons_insert ON weapons
   FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS weapons_update ON weapons;
 CREATE POLICY weapons_update ON weapons
   FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS weapons_delete ON weapons;
 CREATE POLICY weapons_delete ON weapons
   FOR DELETE USING (auth.uid() = user_id);
 
 -- ---------------- generals（共享世界：登录用户可见所有武将，写操作仅本人） ----------------
+DROP POLICY IF EXISTS generals_select ON generals;
 CREATE POLICY generals_select ON generals
   FOR SELECT USING (auth.uid() IS NOT NULL);
+DROP POLICY IF EXISTS generals_insert ON generals;
 CREATE POLICY generals_insert ON generals
   FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS generals_update ON generals;
 CREATE POLICY generals_update ON generals
   FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS generals_delete ON generals;
 CREATE POLICY generals_delete ON generals
   FOR DELETE USING (auth.uid() = user_id);
 
 -- ---------------- cities（共享世界：登录用户可见所有城池，写操作仅本人） ----------------
+DROP POLICY IF EXISTS cities_select ON cities;
 CREATE POLICY cities_select ON cities
   FOR SELECT USING (auth.uid() IS NOT NULL);
+DROP POLICY IF EXISTS cities_insert ON cities;
 CREATE POLICY cities_insert ON cities
   FOR INSERT WITH CHECK (auth.uid() = owner_user_id);
+DROP POLICY IF EXISTS cities_update ON cities;
 CREATE POLICY cities_update ON cities
   FOR UPDATE USING (auth.uid() = owner_user_id) WITH CHECK (auth.uid() = owner_user_id);
+DROP POLICY IF EXISTS cities_delete ON cities;
 CREATE POLICY cities_delete ON cities
   FOR DELETE USING (auth.uid() = owner_user_id);
 
 -- ---------------- wildlands（登录可读；攻打者回写战斗结果） ----------------
+DROP POLICY IF EXISTS wildlands_select ON wildlands;
 CREATE POLICY wildlands_select ON wildlands
   FOR SELECT USING (auth.uid() IS NOT NULL);
 -- 攻打者回写仅允许「真实打赢」：匹配的 battle_instances 必须是该攻击者发起且
 -- winner='attacker'，且目标野地尚未被攻破（defeated_at IS NULL 防止重复改写）。
 -- 防御纵深：即便用户能自行 INSERT 伪造 battle_instances，也至少要求伪造行声明
 -- 攻击者胜，并与 UPDATE USING 的 defeated_at 守卫共同兜底，避免任意改任意野地。
+DROP POLICY IF EXISTS wildlands_update_attacker ON wildlands;
 CREATE POLICY wildlands_update_attacker ON wildlands
   FOR UPDATE USING (
     defeated_at IS NULL
@@ -368,44 +388,59 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS wildlands_attacker_update_guard ON wildlands;
 CREATE TRIGGER wildlands_attacker_update_guard
   BEFORE UPDATE ON wildlands
   FOR EACH ROW
   EXECUTE FUNCTION wildlands_attacker_update_guard();
 
 -- ---------------- progression（仅本人） ----------------
+DROP POLICY IF EXISTS progression_select ON progression;
 CREATE POLICY progression_select ON progression
   FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS progression_insert ON progression;
 CREATE POLICY progression_insert ON progression
   FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS progression_update ON progression;
 CREATE POLICY progression_update ON progression
   FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS progression_delete ON progression;
 CREATE POLICY progression_delete ON progression
   FOR DELETE USING (auth.uid() = user_id);
 
 -- ---------------- resources（仅本人） ----------------
+DROP POLICY IF EXISTS resources_select ON resources;
 CREATE POLICY resources_select ON resources
   FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS resources_insert ON resources;
 CREATE POLICY resources_insert ON resources
   FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS resources_update ON resources;
 CREATE POLICY resources_update ON resources
   FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS resources_delete ON resources;
 CREATE POLICY resources_delete ON resources
   FOR DELETE USING (auth.uid() = user_id);
 
 -- ---------------- action_points（仅本人） ----------------
+DROP POLICY IF EXISTS action_points_select ON action_points;
 CREATE POLICY action_points_select ON action_points
   FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS action_points_insert ON action_points;
 CREATE POLICY action_points_insert ON action_points
   FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS action_points_update ON action_points;
 CREATE POLICY action_points_update ON action_points
   FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS action_points_delete ON action_points;
 CREATE POLICY action_points_delete ON action_points
   FOR DELETE USING (auth.uid() = user_id);
 
 -- ---------------- army_units（仅本人；general_id 须归本人） ----------------
+DROP POLICY IF EXISTS army_units_select ON army_units;
 CREATE POLICY army_units_select ON army_units
   FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS army_units_insert ON army_units;
 CREATE POLICY army_units_insert ON army_units
   FOR INSERT WITH CHECK (
     auth.uid() = user_id
@@ -413,14 +448,18 @@ CREATE POLICY army_units_insert ON army_units
       SELECT 1 FROM generals g WHERE g.id = general_id AND g.user_id = auth.uid()
     )
   );
+DROP POLICY IF EXISTS army_units_update ON army_units;
 CREATE POLICY army_units_update ON army_units
   FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS army_units_delete ON army_units;
 CREATE POLICY army_units_delete ON army_units
   FOR DELETE USING (auth.uid() = user_id);
 
 -- ---------------- marches（仅本人；general_id 须归本人） ----------------
+DROP POLICY IF EXISTS marches_select ON marches;
 CREATE POLICY marches_select ON marches
   FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS marches_insert ON marches;
 CREATE POLICY marches_insert ON marches
   FOR INSERT WITH CHECK (
     auth.uid() = user_id
@@ -428,28 +467,38 @@ CREATE POLICY marches_insert ON marches
       SELECT 1 FROM generals g WHERE g.id = general_id AND g.user_id = auth.uid()
     )
   );
+DROP POLICY IF EXISTS marches_update ON marches;
 CREATE POLICY marches_update ON marches
   FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS marches_delete ON marches;
 CREATE POLICY marches_delete ON marches
   FOR DELETE USING (auth.uid() = user_id);
 
 -- ---------------- battle_instances（归属方为攻击者） ----------------
+DROP POLICY IF EXISTS battle_instances_select ON battle_instances;
 CREATE POLICY battle_instances_select ON battle_instances
   FOR SELECT USING (auth.uid() = attacker_user_id);
+DROP POLICY IF EXISTS battle_instances_insert ON battle_instances;
 CREATE POLICY battle_instances_insert ON battle_instances
   FOR INSERT WITH CHECK (auth.uid() = attacker_user_id);
+DROP POLICY IF EXISTS battle_instances_update ON battle_instances;
 CREATE POLICY battle_instances_update ON battle_instances
   FOR UPDATE USING (auth.uid() = attacker_user_id) WITH CHECK (auth.uid() = attacker_user_id);
+DROP POLICY IF EXISTS battle_instances_delete ON battle_instances;
 CREATE POLICY battle_instances_delete ON battle_instances
   FOR DELETE USING (auth.uid() = attacker_user_id);
 
 -- ---------------- battle_reports（仅本人） ----------------
+DROP POLICY IF EXISTS battle_reports_select ON battle_reports;
 CREATE POLICY battle_reports_select ON battle_reports
   FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS battle_reports_insert ON battle_reports;
 CREATE POLICY battle_reports_insert ON battle_reports
   FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS battle_reports_update ON battle_reports;
 CREATE POLICY battle_reports_update ON battle_reports
   FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS battle_reports_delete ON battle_reports;
 CREATE POLICY battle_reports_delete ON battle_reports
   FOR DELETE USING (auth.uid() = user_id);
 
@@ -653,6 +702,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS trg_seed_new_user ON auth.users;
 CREATE TRIGGER trg_seed_new_user
   AFTER INSERT ON auth.users
   FOR EACH ROW
@@ -661,13 +711,13 @@ CREATE TRIGGER trg_seed_new_user
 -- =============================================================
 -- 16. 军团（社交层）：创建/加入/退出，无 PvP 战斗
 -- =============================================================
-CREATE TABLE guilds (
+CREATE TABLE IF NOT EXISTS guilds (
   id text PRIMARY KEY,
   name text NOT NULL UNIQUE,
   leader_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE TABLE guild_members (
+CREATE TABLE IF NOT EXISTS guild_members (
   guild_id text NOT NULL REFERENCES guilds(id) ON DELETE CASCADE,
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   joined_at timestamptz NOT NULL DEFAULT now(),
@@ -679,26 +729,33 @@ ALTER TABLE guilds ENABLE ROW LEVEL SECURITY;
 ALTER TABLE guild_members ENABLE ROW LEVEL SECURITY;
 
 -- guilds：登录用户可读全部；创建任意登录用户；改名/解散仅 leader
+DROP POLICY IF EXISTS guilds_select ON guilds;
 CREATE POLICY guilds_select ON guilds FOR SELECT USING (auth.uid() IS NOT NULL);
+DROP POLICY IF EXISTS guilds_insert ON guilds;
 CREATE POLICY guilds_insert ON guilds
   FOR INSERT WITH CHECK (auth.uid() = leader_user_id);
+DROP POLICY IF EXISTS guilds_update ON guilds;
 CREATE POLICY guilds_update ON guilds
   FOR UPDATE USING (auth.uid() = leader_user_id) WITH CHECK (auth.uid() = leader_user_id);
+DROP POLICY IF EXISTS guilds_delete ON guilds;
 CREATE POLICY guilds_delete ON guilds
   FOR DELETE USING (auth.uid() = leader_user_id);
 
 -- guild_members：登录用户可读全部；加入/退出仅本人
+DROP POLICY IF EXISTS guild_members_select ON guild_members;
 CREATE POLICY guild_members_select ON guild_members
   FOR SELECT USING (auth.uid() IS NOT NULL);
+DROP POLICY IF EXISTS guild_members_insert ON guild_members;
 CREATE POLICY guild_members_insert ON guild_members
   FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS guild_members_delete ON guild_members;
 CREATE POLICY guild_members_delete ON guild_members
   FOR DELETE USING (auth.uid() = user_id);
 
 -- =============================================================
 -- 17. PvP 挑战（1v1）：发起/结算/取消，结算由 SECURITY DEFINER RPC 写入
 -- =============================================================
-CREATE TABLE challenges (
+CREATE TABLE IF NOT EXISTS challenges (
   id text PRIMARY KEY,
   challenger_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   target_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -713,12 +770,15 @@ CREATE TABLE challenges (
 );
 ALTER TABLE challenges ENABLE ROW LEVEL SECURITY;
 -- 双方（挑战者/被挑战者）可读自己的挑战；发起者写；结算由 RPC（SECURITY DEFINER）写
+DROP POLICY IF EXISTS challenges_select ON challenges;
 CREATE POLICY challenges_select ON challenges
   FOR SELECT USING (auth.uid() IN (challenger_user_id, target_user_id));
+DROP POLICY IF EXISTS challenges_insert ON challenges;
 CREATE POLICY challenges_insert ON challenges
   FOR INSERT WITH CHECK (auth.uid() = challenger_user_id);
 -- 挑战者本人可删除自己的挑战：供 initiateChallenge 在 RPC 结算失败时回滚 pending 行。
 -- 若无此策略，回滚 delete 会被 RLS 拒绝（且错误被吞掉），孤儿挑战无法清理。
+DROP POLICY IF EXISTS challenges_delete ON challenges;
 CREATE POLICY challenges_delete ON challenges
   FOR DELETE USING (auth.uid() = challenger_user_id);
 
@@ -727,7 +787,7 @@ CREATE POLICY challenges_delete ON challenges
 -- =============================================================
 -- 本表镜像 shared/src/troops.ts 的 TROOP_CATALOG（单兵 power）。
 -- 单一数据源是 shared/src/troops.ts；troop_stats 是给 RPC 用的 SQL 侧副本，改动须两边同步。
-CREATE TABLE troop_stats (
+CREATE TABLE IF NOT EXISTS troop_stats (
   soldier_level integer PRIMARY KEY,
   power integer NOT NULL
 );
@@ -753,7 +813,7 @@ INSERT INTO troop_stats (soldier_level, power) VALUES
 --     二者含 NOT NULL 野地外键与野地回写 RLS，无法承载 1v1 PvP，
 --     故为 PvP 另建一对表。均只读，写入由 resolve_pvp（SECURITY DEFINER）负责）
 -- =============================================================
-CREATE TABLE pvp_battle_instances (
+CREATE TABLE IF NOT EXISTS pvp_battle_instances (
   id text PRIMARY KEY,
   challenger_general_id text NOT NULL REFERENCES generals(id) ON DELETE CASCADE,
   target_general_id text NOT NULL REFERENCES generals(id) ON DELETE CASCADE,
@@ -769,7 +829,7 @@ CREATE TABLE pvp_battle_instances (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE pvp_battle_reports (
+CREATE TABLE IF NOT EXISTS pvp_battle_reports (
   id text PRIMARY KEY,
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   general_id text NOT NULL REFERENCES generals(id) ON DELETE CASCADE,
@@ -786,9 +846,11 @@ ALTER TABLE pvp_battle_instances ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pvp_battle_reports ENABLE ROW LEVEL SECURITY;
 
 -- 双方（挑战者/被挑战者）可读战斗记录；写入由 SECURITY DEFINER RPC 完成
+DROP POLICY IF EXISTS pvp_battle_instances_select ON pvp_battle_instances;
 CREATE POLICY pvp_battle_instances_select ON pvp_battle_instances
   FOR SELECT USING (auth.uid() IN (challenger_user_id, target_user_id));
 -- 每名玩家只读自己的战报
+DROP POLICY IF EXISTS pvp_battle_reports_select ON pvp_battle_reports;
 CREATE POLICY pvp_battle_reports_select ON pvp_battle_reports
   FOR SELECT USING (auth.uid() = user_id);
 
@@ -798,7 +860,7 @@ CREATE POLICY pvp_battle_reports_select ON pvp_battle_reports
 --      result: 仅两种——城池攻防无平局（均势时胜率恰为 0.5，由种子随机定胜负）
 --      双方（登录用户）可读；仅攻击方可插入/删除；结算由 RPC 写
 -- =============================================================
-CREATE TABLE sieges (
+CREATE TABLE IF NOT EXISTS sieges (
   id text PRIMARY KEY,
   attacker_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   target_city_id text NOT NULL REFERENCES cities(id) ON DELETE CASCADE,
@@ -808,13 +870,16 @@ CREATE TABLE sieges (
   resolved_at timestamptz
 );
 ALTER TABLE sieges ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS sieges_select ON sieges;
 CREATE POLICY sieges_select ON sieges FOR SELECT USING (
   auth.uid() IN (
     attacker_user_id,
     (SELECT owner_user_id FROM cities WHERE id = target_city_id)
   )
 );
+DROP POLICY IF EXISTS sieges_insert ON sieges;
 CREATE POLICY sieges_insert ON sieges FOR INSERT WITH CHECK (auth.uid() = attacker_user_id);
+DROP POLICY IF EXISTS sieges_delete ON sieges;
 CREATE POLICY sieges_delete ON sieges FOR DELETE USING (auth.uid() = attacker_user_id);
 
 -- =============================================================
@@ -1556,7 +1621,7 @@ $$;
 -- -------------------------------------------------------------
 -- 启用 RLS 但「不创建任何策略」：客户端（anon 直连）无法直接读写该表，
 -- 仅 SECURITY DEFINER 管理函数以表所有者身份绕过 RLS 访问，杜绝客户端直改参数。
-CREATE TABLE game_params (
+CREATE TABLE IF NOT EXISTS game_params (
   key text PRIMARY KEY,
   value text NOT NULL
 );
