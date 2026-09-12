@@ -51,6 +51,7 @@ import './world.css';
 
 interface WorldViewProps {
   user: AuthUser;
+  isAdmin: boolean;
   onLogout(): void;
 }
 
@@ -88,7 +89,7 @@ function mergeActiveMarchPositions(
 /** 登录后主界面：变体 C「运筹帷幄」桌游指挥台布局。
  * 全部数据来自 data.ts（Supabase），行军位置本地 computeMarchPosition 插值渲染，
  * 以 setInterval 轮询 fetchWorld 刷新到达/资源/战报。 */
-export function WorldView({ user, onLogout }: WorldViewProps) {
+export function WorldView({ user, isAdmin, onLogout }: WorldViewProps) {
   const [world, setWorld] = useState<WorldStateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<MapCell | null>(null);
@@ -557,6 +558,11 @@ export function WorldView({ user, onLogout }: WorldViewProps) {
         <span className="ap">
           行动点 {world.actionPoints.current}/{world.actionPoints.max}
         </span>
+        {isAdmin && (
+          <button type="button" className="logout">
+            后台
+          </button>
+        )}
         <button type="button" className="logout" onClick={onLogout}>
           登出
         </button>

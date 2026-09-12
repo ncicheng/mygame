@@ -1072,6 +1072,122 @@ export async function upgradeWeapon(
 }
 
 // ---------------------------------------------------------------------------
+// 管理后台
+// ---------------------------------------------------------------------------
+
+/** 读取用户是否为管理员（profiles.is_admin）；无建档或无标志返回 false。 */
+export async function fetchIsAdmin(
+  userId: string,
+  client: SupabaseClient = supabase,
+): Promise<boolean> {
+  const { data, error } = await client
+    .from('profiles')
+    .select('is_admin')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw new Error(`读取管理员状态失败：${error.message}`);
+  return data?.is_admin ?? false;
+}
+
+/** 列出全部用户及养成概览（admin_list_users 返回 jsonb 数组）；无数据返回 []。 */
+export async function adminListUsers(
+  client: SupabaseClient = supabase,
+): Promise<Record<string, unknown>[]> {
+  const { data, error } = await client.rpc('admin_list_users');
+  if (error) throw new Error(`读取用户列表失败：${error.message}`);
+  return Array.isArray(data) ? data : [];
+}
+
+/** 调整用户（最早一名）武将的等级/星级。 */
+export async function adminSetGeneral(
+  userId: string,
+  level: number,
+  stars: number,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client.rpc('admin_set_general', { p_user_id: userId, p_level: level, p_stars: stars });
+  if (error) throw new Error(`调整武将失败：${error.message}`);
+}
+
+/** 调整用户（最早一件）武器的阶。 */
+export async function adminSetWeaponTier(
+  userId: string,
+  tier: number,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client.rpc('admin_set_weapon_tier', { p_user_id: userId, p_tier: tier });
+  if (error) throw new Error(`调整武器失败：${error.message}`);
+}
+
+/** 设置用户部队最高兵种解锁等级。 */
+export async function adminSetTroopUnlock(
+  userId: string,
+  maxLevel: number,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client.rpc('admin_set_troop_unlock', { p_user_id: userId, p_max_level: maxLevel });
+  if (error) throw new Error(`调整兵种解锁失败：${error.message}`);
+}
+
+/** 按增量调整用户四项资源（可负，下限 0）。 */
+export async function adminAdjustResources(
+  userId: string,
+  food: number,
+  iron: number,
+  rare: number,
+  gold: number,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client.rpc('admin_adjust_resources', {
+    p_user_id: userId,
+    p_food: food,
+    p_iron: iron,
+    p_rare: rare,
+    p_gold: gold,
+  });
+  if (error) throw new Error(`调整资源失败：${error.message}`);
+}
+
+/** 修改用户昵称。 */
+export async function adminSetNickname(
+  userId: string,
+  nickname: string,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client.rpc('admin_set_nickname', { p_user_id: userId, p_nickname: nickname });
+  if (error) throw new Error(`修改昵称失败：${error.message}`);
+}
+
+/** 授予/撤销用户管理员标志。 */
+export async function adminSetAdmin(
+  userId: string,
+  isAdmin: boolean,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client.rpc('admin_set_admin', { p_user_id: userId, p_is_admin: isAdmin });
+  if (error) throw new Error(`调整管理员失败：${error.message}`);
+}
+
+/** 读取全部游戏参数（admin_get_params 返回 jsonb 对象）；无数据返回 {}。 */
+export async function adminGetParams(
+  client: SupabaseClient = supabase,
+): Promise<Record<string, unknown>> {
+  const { data, error } = await client.rpc('admin_get_params');
+  if (error) throw new Error(`读取游戏参数失败：${error.message}`);
+  return (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;
+}
+
+/** 设置单条游戏参数（upsert）。 */
+export async function adminSetParam(
+  key: string,
+  value: string,
+  client: SupabaseClient = supabase,
+): Promise<void> {
+  const { error } = await client.rpc('admin_set_param', { p_key: key, p_value: value });
+  if (error) throw new Error(`设置游戏参数失败：${error.message}`);
+}
+
+// ---------------------------------------------------------------------------
 // 私有辅助
 // ---------------------------------------------------------------------------
 
