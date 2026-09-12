@@ -101,6 +101,8 @@ export interface WorldCity {
   x: number;
   y: number;
   side: Side;
+  /** 城池拥有者 user_id（判断同军团友军用） */
+  ownerUserId?: string;
   /** 城池拥有者昵称；未能取到时为 null */
   ownerName?: string | null;
   /** 城池拥有者武将等级；未能取到时为 null */
@@ -126,6 +128,8 @@ export interface WorldArmy {
   troopCount: number;
   /** 部队将领等级 */
   generalLevel?: number;
+  /** 部队拥有者 user_id（判断同军团友军用） */
+  ownerUserId?: string;
   /** 部队拥有者昵称；未能取到时为 null */
   ownerName?: string | null;
   /** 进行中的行军；无行军时为 null */

@@ -352,6 +352,7 @@ export async function fetchWorld(
     x: r.x,
     y: r.y,
     side: r.owner_user_id === userId ? 'me' : 'enemy',
+    ownerUserId: r.owner_user_id,
     ownerName: userInfo[r.owner_user_id]?.nickname ?? null,
     ownerLevel: userInfo[r.owner_user_id]?.level ?? null,
   }));
@@ -372,6 +373,7 @@ export async function fetchWorld(
       x: r.x,
       y: r.y,
       side: r.user_id === userId ? 'me' : 'enemy',
+      ownerUserId: r.user_id,
       generalLevel: r.level,
       ownerName: userInfo[r.user_id]?.nickname ?? null,
       troopCount,

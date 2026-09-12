@@ -279,7 +279,8 @@
 
 /* 城池标记：小圆点居左下角，可同时显示城内部队 */
 .vc .mk-city-me,
-.vc .mk-city-enm {
+.vc .mk-city-enm,
+.vc .mk-city-fr {
   inset: auto auto 1px 1px;
   width: 40%;
   height: 40%;
@@ -290,7 +291,8 @@
 /* 野地/部队标记：居中大圆点 */
 .vc .mk-bandit,
 .vc .mk-army-me,
-.vc .mk-army-enm {
+.vc .mk-army-enm,
+.vc .mk-army-fr {
   inset: 12%;
   font-size: 9px;
   line-height: 1;
@@ -306,6 +308,13 @@
   background: var(--mg-red);
   color: #fff;
   box-shadow: 0 0 8px rgba(224, 82, 82, 0.8);
+}
+
+/* 友军（同军团）：青蓝色 */
+.vc .mk-city-fr {
+  background: #2fb8c9;
+  color: #032530;
+  box-shadow: 0 0 8px rgba(47, 184, 201, 0.8);
 }
 
 .vc .mk-bandit {
@@ -334,6 +343,12 @@
   background: #d04040;
   color: #fff;
   box-shadow: 0 0 8px rgba(208, 64, 64, 0.8);
+}
+
+.vc .mk-army-fr {
+  background: #2fb8c9;
+  color: #032530;
+  box-shadow: 0 0 8px rgba(47, 184, 201, 0.8);
 }
 
 /* 行军中的部队：青色呼吸光提示移动 */

@@ -464,10 +464,18 @@ export function WorldView({ user, isAdmin, onLogout, onOpenAdmin }: WorldViewPro
     setSiegeMsg(null);
   }, [siegeMode]);
 
+  // 同军团成员 id 集合（地图把这些玩家的单位标记为「友」，且不可被挑战/攻城）；未入团为空
+  const friendUserIds = useMemo(() => {
+    if (!myGuild) return new Set<string>();
+    return new Set(guildMembers.map((m) => m.userId));
+  }, [myGuild, guildMembers]);
+
   const handleCellClick = useCallback(
     (cell: MapCell) => {
       if (challengeMode) {
-        const enemy = cell.markers.find((m) => m.army?.side === 'enemy')?.army ?? null;
+        const enemy = cell.markers.find(
+          (m) => m.army?.side === 'enemy' && (!m.army?.ownerUserId || !friendUserIds.has(m.army.ownerUserId)),
+        )?.army ?? null;
         if (enemy) {
           void handleChallenge(enemy.id);
           return;
@@ -476,7 +484,9 @@ export function WorldView({ user, isAdmin, onLogout, onOpenAdmin }: WorldViewPro
         return;
       }
       if (siegeMode) {
-        const enemyCity = cell.markers.find((m) => m.kind === 'city' && m.side === 'enemy');
+        const enemyCity = cell.markers.find(
+          (m) => m.kind === 'city' && m.side === 'enemy' && (!m.ownerUserId || !friendUserIds.has(m.ownerUserId)),
+        );
         if (enemyCity?.cityId) {
           void handleSiege(enemyCity.cityId);
           return;
@@ -513,7 +523,7 @@ export function WorldView({ user, isAdmin, onLogout, onOpenAdmin }: WorldViewPro
       setChallengeMsg(null);
       setSiegeMsg(null);
     },
-    [marchMode, banditMode, challengeMode, siegeMode, marchArmyId, handleIssueMarch, handleChallenge, handleSiege],
+    [marchMode, banditMode, challengeMode, siegeMode, marchArmyId, handleIssueMarch, handleChallenge, handleSiege, friendUserIds],
   );
 
   const handleArmyClick = useCallback(
@@ -641,11 +651,15 @@ export function WorldView({ user, isAdmin, onLogout, onOpenAdmin }: WorldViewPro
     [refreshAll],
   );
 
-  // 选中格上的敌方部队（side='enemy'）；选中敌方时显示"挑战"入口
-  const selectedEnemyArmy = selected?.markers.find((m) => m.army?.side === 'enemy')?.army ?? null;
+  // 选中格上的敌方部队（side='enemy'，排除同军团友军）；选中敌方时显示"挑战"入口
+  const selectedEnemyArmy = selected?.markers.find(
+    (m) => m.army?.side === 'enemy' && (!m.army?.ownerUserId || !friendUserIds.has(m.army.ownerUserId)),
+  )?.army ?? null;
 
-  // 选中格上的敌方城池（side='enemy'）；选中敌方城池时显示"攻城"入口
-  const selectedEnemyCity = selected?.markers.find((m) => m.kind === 'city' && m.side === 'enemy') ?? null;
+  // 选中格上的敌方城池（side='enemy'，排除同军团友军）；选中敌方城池时显示"攻城"入口
+  const selectedEnemyCity = selected?.markers.find(
+    (m) => m.kind === 'city' && m.side === 'enemy' && (!m.ownerUserId || !friendUserIds.has(m.ownerUserId)),
+  ) ?? null;
 
   // 城池 id → 名称：攻城卡展示目标城名用（hooks 须无条件调用，world 可为空）
   const cityNameById = useMemo(() => {
@@ -729,6 +743,7 @@ export function WorldView({ user, isAdmin, onLogout, onOpenAdmin }: WorldViewPro
         <section className="boardwrap">
           <MapBoard
             world={world}
+            friendUserIds={friendUserIds}
             onCellClick={handleCellClick}
             onArmyClick={handleArmyClick}
             selectedArmyId={marchArmyId}
